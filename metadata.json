@@ -1,0 +1,5 @@
+{
+  "name": "GAS Code Assistant",
+  "description": "Upload your Google Apps Script project files to receive an in-depth analysis, recommendations for improvement, and even corrected code snippets, all powered by the Gemini API.",
+  "requestFramePermissions": []
+}
