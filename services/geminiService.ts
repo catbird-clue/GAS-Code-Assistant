@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type, Chat } from "@google/genai";
-import { UploadedFile, Analysis, RefactorResult } from '../types';
+import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult } from '../types';
 
 const API_KEY = process.env.API_KEY;
 
@@ -135,36 +135,49 @@ ${frontendSection}
 `;
 }
 
-async function handleGeminiCall(prompt: string, schema: object) {
-  try {
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: schema,
+async function handleGeminiCallWithRetry(prompt: string, schema: object | null, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const config: any = {};
+      if (schema) {
+        config.responseMimeType = "application/json";
+        config.responseSchema = schema;
       }
-    });
-    const jsonText = response.text.trim();
-    return JSON.parse(jsonText);
-  } catch (e) {
-    console.error("Gemini API call failed:", e);
-    if (e instanceof Error) {
-        if (e.message.includes('Rpc failed')) {
+
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: prompt,
+        config: config,
+      });
+
+      if (schema) {
+        const jsonText = response.text.trim();
+        return JSON.parse(jsonText);
+      }
+      return response.text.trim();
+
+    } catch (e) {
+      console.error(`Gemini API call attempt ${i + 1} failed:`, e);
+      if (i === retries - 1) { // Last attempt
+        if (e instanceof Error) {
+          if (e.message.includes('Rpc failed')) {
             throw new Error("Не удалось подключиться к API Gemini. Это может быть связано с сетевыми ограничениями в вашей среде. Убедитесь, что у вас есть прямое подключение к generativelanguage.googleapis.com.");
+          }
+          if (e.message.includes('JSON')) {
+            throw new Error("API вернул ответ в неправильном формате JSON. Проверьте консоль для деталей.");
+          }
         }
-        if (e.message.includes('JSON')) {
-             throw new Error("API вернул ответ в неправильном формате JSON. Проверьте консоль для деталей.");
-        }
+        throw new Error(`Произошла неизвестная ошибка при вызове API после ${retries} попыток: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      await new Promise(res => setTimeout(res, 1000 * (i + 1))); // Exponential backoff
     }
-    // Fallback for other errors
-    throw new Error(`Произошла неизвестная ошибка при вызове API: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
+
 export async function analyzeGasProject({ libraryFiles, frontendFiles }: { libraryFiles: UploadedFile[], frontendFiles: UploadedFile[] }): Promise<Analysis> {
   const prompt = buildAnalysisPrompt({ libraryFiles, frontendFiles });
-  return handleGeminiCall(prompt, analysisSchema);
+  return handleGeminiCallWithRetry(prompt, analysisSchema);
 }
 
 interface AskQuestionParams {
@@ -236,6 +249,16 @@ const refactorChangeSchema = {
     required: ['fileName', 'description', 'originalCodeSnippet', 'correctedCodeSnippet']
 };
 
+const manualStepSchema = {
+    type: Type.OBJECT,
+    properties: {
+        title: { type: Type.STRING, description: "Короткий, ясный заголовок для ручного действия. Например, 'Обновить электронную таблицу'." },
+        description: { type: Type.STRING, description: "Подробное, пошаговое описание того, что пользователь должен сделать вручную. Включите любые конкретные значения или имена, которые он должен использовать." },
+        fileName: { type: Type.STRING, description: "Имя соответствующего файла для этого ручного шага, если применимо." }
+    },
+    required: ['title', 'description']
+};
+
 const refactorSchema = {
     type: Type.OBJECT,
     properties: {
@@ -256,15 +279,7 @@ const refactorSchema = {
         manualSteps: {
             type: Type.ARRAY,
             description: "Список ручных действий, которые пользователь ДОЛЖЕН выполнить после применения изменений в коде. Например, установка свойства скрипта или обновление электронной таблицы. Если ручные шаги не требуются, верните пустой массив.",
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    title: { type: Type.STRING, description: "Короткий, ясный заголовок для ручного действия. Например, 'Обновить электронную таблицу'." },
-                    description: { type: Type.STRING, description: "Подробное, пошаговое описание того, что пользователь должен сделать вручную. Включите любые конкретные значения или имена, которые он должен использовать." },
-                    fileName: { type: Type.STRING, description: "Имя соответствующего файла для этого ручного шага, если применимо." }
-                },
-                required: ['title', 'description']
-            }
+            items: manualStepSchema
         }
     },
     required: ['mainChange', 'relatedChanges', 'manualSteps']
@@ -313,16 +328,79 @@ ${frontendSection}
 6.  **Populate 'manualSteps':** If any such actions are required, populate the \`manualSteps\` array with clear, step-by-step instructions. If no manual steps are needed, this array MUST be empty.
 `;
 
-  return handleGeminiCall(prompt, refactorSchema);
+  return handleGeminiCallWithRetry(prompt, refactorSchema);
+}
+
+const batchRefactorSchema = {
+    type: Type.OBJECT,
+    properties: {
+        changes: {
+            type: Type.ARRAY,
+            description: "A consolidated list of all code changes required across all files.",
+            items: refactorChangeSchema
+        },
+        manualSteps: {
+            type: Type.ARRAY,
+            description: "A consolidated list of unique manual steps required after all changes are applied.",
+            items: manualStepSchema
+        }
+    },
+    required: ['changes', 'manualSteps']
+};
+
+
+export async function batchRefactorCode({ instructions, libraryFiles, frontendFiles }: { instructions: BatchInstruction[], libraryFiles: UploadedFile[], frontendFiles: UploadedFile[] }): Promise<BatchRefactorResult> {
+  const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
+  const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
+
+  const instructionsText = instructions.map((instr, index) => `
+    **Task ${index + 1}:**
+    - **File:** \`${instr.fileName}\`
+    - **Instruction:** ${instr.instruction}
+    - **Original Code Snippet to Refactor:**
+      \`\`\`
+      ${instr.code}
+      \`\`\`
+  `).join('\n---\n');
+  
+  const prompt = `
+You are an expert Google Apps Script (GAS) developer specializing in context-aware, batch code refactoring.
+Your task is to perform multiple refactoring tasks across the entire project simultaneously. You will receive a list of tasks. You must analyze their combined impact and produce a single, consolidated list of changes in a JSON object.
+You MUST respond exclusively in Russian.
+
+**Full Project Context:**
+${librarySection}
+${frontendSection}
+
+---
+
+**Refactoring Tasks:**
+You must perform all of the following tasks. Consider how they might interact with each other.
+${instructionsText}
+
+---
+
+**Your Task & JSON Output:**
+1.  **Consolidate All Changes:** Analyze all tasks and their project-wide impact. Generate a single, flat list of all unique code changes required. Each change object in the 'changes' array must contain the file name, a description, the exact original code snippet, and the corrected code snippet.
+2.  **Ensure Exact Snippets:** The \`originalCodeSnippet\` for each change MUST be an exact, verbatim match from the source files. This is critical.
+3.  **Consolidate Manual Steps:** Review all changes and create a consolidated, de-duplicated list of any manual follow-up actions required.
+4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
+`;
+
+  return handleGeminiCallWithRetry(prompt, batchRefactorSchema);
 }
 
 
-function buildChangelogPrompt(currentChangelog: string, changeDescription: string): string {
+function buildChangelogPrompt(currentChangelog: string, changeDescription: string, language: string): string {
+  const langInstruction = language === 'en' 
+    ? "You MUST respond exclusively in English. All changelog entries must be in English."
+    : "You MUST respond exclusively in Russian. Все записи в журнале изменений должны быть на русском языке.";
+
   return `
 You are a software engineer's assistant specializing in maintaining changelogs.
 Your task is to update the provided CHANGELOG.md file content based on a description of a recent code change.
 You MUST adhere strictly to the "Keep a Changelog" format.
-You MUST respond exclusively in Russian.
+${langInstruction}
 
 **RULES:**
 1.  Find the \`## [Unreleased]\` section. If it doesn't exist, create it at the top, below the header and any existing links.
@@ -344,27 +422,19 @@ ${currentChangelog}
 Now, provide the full updated CHANGELOG.md content.`;
 }
 
-export async function updateChangelog({ currentChangelog, changeDescription }: { currentChangelog: string, changeDescription: string }): Promise<string> {
-  const prompt = buildChangelogPrompt(currentChangelog, changeDescription);
-  try {
-    const response = await ai.models.generateContent({
-      model: model,
-      contents: prompt,
-    });
-    
-    let text = response.text.trim();
-    if (text.startsWith('```markdown')) {
-        text = text.substring('```markdown'.length);
-    }
-    if (text.startsWith('```')) {
-        text = text.substring(3);
-    }
-    if (text.endsWith('```')) {
-        text = text.substring(0, text.length - 3);
-    }
-    return text.trim();
-  } catch (e) {
-    console.error("Gemini API call for changelog failed:", e);
-    throw new Error(`Не удалось обновить CHANGELOG: ${e instanceof Error ? e.message : String(e)}`);
+export async function updateChangelog({ currentChangelog, changeDescription, language = 'ru' }: { currentChangelog: string, changeDescription: string, language: string }): Promise<string> {
+  const prompt = buildChangelogPrompt(currentChangelog, changeDescription, language);
+  
+  let text = await handleGeminiCallWithRetry(prompt, null) as string;
+  
+  if (text.startsWith('```markdown')) {
+      text = text.substring('```markdown'.length);
   }
+  if (text.startsWith('```')) {
+      text = text.substring(3);
+  }
+  if (text.endsWith('```')) {
+      text = text.substring(0, text.length - 3);
+  }
+  return text.trim();
 }

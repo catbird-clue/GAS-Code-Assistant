@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { CopyIcon, CheckIcon } from './icons';
 
 interface AnswerBlockProps {
@@ -14,6 +15,8 @@ const AnswerBlock: React.FC<AnswerBlockProps> = ({ answer }) => {
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
   };
+  
+  const sanitizedHtml = DOMPurify.sanitize(marked.parse(answer) as string);
 
   return (
     <div className="relative group">
@@ -27,7 +30,7 @@ const AnswerBlock: React.FC<AnswerBlockProps> = ({ answer }) => {
       </button>
       <div
         className="prose prose-invert text-gray-300 max-w-none prose-ul:list-disc prose-ul:ml-5 prose-li:my-1 prose-strong:text-white leading-relaxed prose-pre:bg-gray-900 prose-pre:p-4 prose-pre:rounded-md"
-        dangerouslySetInnerHTML={{ __html: marked.parse(answer) }}
+        dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
       />
     </div>
   );

@@ -1,8 +1,9 @@
 import React from 'react';
 import CodeBlock from './CodeBlock';
 import { Analysis, FileAnalysis, Recommendation, SuggestedFix, AnalysisStats, ConversationTurn } from '../types';
-import { AlertTriangleIcon, CheckIcon, LightbulbIcon, ShieldCheckIcon, FileTextIcon, UndoIcon } from './icons';
+import { AlertTriangleIcon, CheckIcon, LightbulbIcon, ShieldCheckIcon, FileTextIcon, UndoIcon, WandIcon } from './icons';
 import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import AnswerBlock from './AnswerBlock';
 
 
@@ -17,6 +18,10 @@ interface AnalysisResultProps {
   isAnswering: boolean;
   onUndo: () => void;
   canUndo: boolean;
+  selectedFixes: Record<string, any>;
+  onToggleFixSelection: (key: string, fixDetails: {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}) => void;
+  onApplySelectedFixes: () => void;
+  isApplyingChanges: boolean;
 }
 
 const generateMarkdownReport = (analysis: Analysis): string => {
@@ -142,13 +147,27 @@ const SuggestionCard: React.FC<{
     isApplied: boolean;
     isAnyApplied: boolean;
     onApply: () => void;
-}> = ({ suggestion, isApplied, isAnyApplied, onApply }) => {
+    language: string;
+    isSelected: boolean;
+    onToggleSelection: () => void;
+}> = ({ suggestion, isApplied, isAnyApplied, onApply, language, isSelected, onToggleSelection }) => {
     return (
-        <div className={`mt-4 p-4 rounded-lg border ${isApplied ? 'border-green-700 bg-green-900/20' : 'border-gray-700 bg-gray-900/50'}`}>
-            <h4 className="font-semibold text-indigo-300">{suggestion.title}</h4>
+        <div className={`mt-4 p-4 rounded-lg border relative ${isApplied ? 'border-green-700 bg-green-900/20' : isSelected ? 'border-indigo-500 bg-indigo-900/20' : 'border-gray-700 bg-gray-900/50'}`}>
+            {!isAnyApplied && (
+              <div className="absolute top-3 right-3">
+                <input 
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={onToggleSelection}
+                  className="w-5 h-5 bg-gray-700 border-gray-500 rounded text-indigo-500 focus:ring-indigo-600 cursor-pointer"
+                  aria-label="Select this fix"
+                />
+              </div>
+            )}
+            <h4 className="font-semibold text-indigo-300 pr-8">{suggestion.title}</h4>
             <p className="text-sm text-gray-400 mt-1 mb-3">{suggestion.description}</p>
             <h5 className="text-xs text-green-400 font-semibold mb-1 uppercase">Предлагаемый код:</h5>
-            <CodeBlock>{suggestion.correctedCodeSnippet}</CodeBlock>
+            <CodeBlock language={language}>{suggestion.correctedCodeSnippet}</CodeBlock>
 
             {isApplied ? (
                 <div
@@ -171,7 +190,14 @@ const SuggestionCard: React.FC<{
 };
 
 
-const RecommendationCard: React.FC<{ fileName: string; recommendation: Recommendation; recIndex: number; onApplyFix: AnalysisResultProps['onApplyFix'] }> = ({ fileName, recommendation, recIndex, onApplyFix }) => {
+const RecommendationCard: React.FC<{ 
+    fileName: string; 
+    recommendation: Recommendation; 
+    recIndex: number; 
+    onApplyFix: AnalysisResultProps['onApplyFix'];
+    selectedFixes: AnalysisResultProps['selectedFixes'];
+    onToggleFixSelection: AnalysisResultProps['onToggleFixSelection'];
+}> = ({ fileName, recommendation, recIndex, onApplyFix, selectedFixes, onToggleFixSelection }) => {
   
   const handleFix = (suggestionIndex: number) => {
     onApplyFix({
@@ -184,6 +210,7 @@ const RecommendationCard: React.FC<{ fileName: string; recommendation: Recommend
 
   const hasSuggestions = recommendation.suggestions && recommendation.suggestions.length > 0;
   const isAnySuggestionApplied = recommendation.appliedSuggestionIndex !== undefined;
+  const language = fileName.split('.').pop() || 'javascript';
 
   return (
     <div className={`bg-gray-800/50 p-4 rounded-lg border ${isAnySuggestionApplied ? 'border-green-800/50' : 'border-gray-700'} mb-4`}>
@@ -198,21 +225,27 @@ const RecommendationCard: React.FC<{ fileName: string; recommendation: Recommend
       {recommendation.originalCodeSnippet && (
         <div>
           <h4 className="text-xs text-red-400 font-semibold mb-1 uppercase">Проблемный код:</h4>
-          <CodeBlock>{recommendation.originalCodeSnippet}</CodeBlock>
+          <CodeBlock language={language}>{recommendation.originalCodeSnippet}</CodeBlock>
         </div>
       )}
 
       {hasSuggestions && (
         <div className="mt-4">
-            {recommendation.suggestions.map((suggestion, index) => (
-                <SuggestionCard 
-                    key={index}
-                    suggestion={suggestion}
-                    isApplied={recommendation.appliedSuggestionIndex === index}
-                    isAnyApplied={isAnySuggestionApplied}
-                    onApply={() => handleFix(index)}
-                />
-            ))}
+            {recommendation.suggestions.map((suggestion, index) => {
+                const key = `${fileName}|${recIndex}|${index}`;
+                return (
+                  <SuggestionCard 
+                      key={index}
+                      suggestion={suggestion}
+                      isApplied={recommendation.appliedSuggestionIndex === index}
+                      isAnyApplied={isAnySuggestionApplied}
+                      onApply={() => handleFix(index)}
+                      language={language}
+                      isSelected={!!selectedFixes[key]}
+                      onToggleSelection={() => onToggleFixSelection(key, {fileName, rec: recommendation, recIndex, suggestionIndex: index})}
+                  />
+                )
+            })}
         </div>
       )}
     </div>
@@ -220,16 +253,29 @@ const RecommendationCard: React.FC<{ fileName: string; recommendation: Recommend
 };
 
 
-const FileAnalysisCard: React.FC<{ fileAnalysis: FileAnalysis; onApplyFix: AnalysisResultProps['onApplyFix'] }> = ({ fileAnalysis, onApplyFix }) => (
+const FileAnalysisCard: React.FC<{ 
+    fileAnalysis: FileAnalysis; 
+    onApplyFix: AnalysisResultProps['onApplyFix'];
+    selectedFixes: AnalysisResultProps['selectedFixes'];
+    onToggleFixSelection: AnalysisResultProps['onToggleFixSelection'];
+}> = ({ fileAnalysis, onApplyFix, selectedFixes, onToggleFixSelection }) => (
   <div className="mb-6">
     <h3 className="text-lg font-semibold mt-6 mb-3 text-indigo-300 border-b border-gray-700 pb-2">{fileAnalysis.fileName}</h3>
     {fileAnalysis.recommendations.map((rec, index) => (
-      <RecommendationCard key={index} fileName={fileAnalysis.fileName} recommendation={rec} recIndex={index} onApplyFix={onApplyFix} />
+      <RecommendationCard 
+        key={index} 
+        fileName={fileAnalysis.fileName} 
+        recommendation={rec} 
+        recIndex={index} 
+        onApplyFix={onApplyFix}
+        selectedFixes={selectedFixes}
+        onToggleFixSelection={onToggleFixSelection}
+      />
     ))}
   </div>
 );
 
-const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, hasFiles, onApplyFix, notification, analysisStats, conversationHistory, isAnswering, onUndo, canUndo }) => {
+const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, hasFiles, onApplyFix, notification, analysisStats, conversationHistory, isAnswering, onUndo, canUndo, selectedFixes, onToggleFixSelection, onApplySelectedFixes, isApplyingChanges }) => {
   const handleExport = () => {
     if (!analysis) return;
     const markdownContent = generateMarkdownReport(analysis);
@@ -243,6 +289,8 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+
+  const selectedCount = Object.keys(selectedFixes).length;
 
   if (isLoading) {
     return (
@@ -326,29 +374,54 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
     }
   
     return (
-      <div className="p-4 md:p-6 text-base max-w-none">
+      <div className="p-4 md:p-6 text-base max-w-none relative">
           <AnalysisSummary analysis={analysis} />
           {analysisStats && <AnalysisMetrics stats={analysisStats} />}
   
           {analysis.libraryProject.length > 0 && (
               <div className="mb-8">
                   <h2 className="text-xl font-bold mt-4 mb-4 text-white">Основной проект (Библиотека)</h2>
-                  {analysis.libraryProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} />)}
+                  {analysis.libraryProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
               </div>
           )}
           {analysis.frontendProject.length > 0 && (
                <div className="mb-8">
                   <h2 className="text-xl font-bold mt-8 mb-4 text-white">Фронтенд-проект</h2>
-                  {analysis.frontendProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} />)}
+                  {analysis.frontendProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
               </div>
           )}
           <div>
               <h2 className="text-xl font-bold mt-8 mb-4 text-white">Общий вывод</h2>
               <div
                 className="prose prose-invert text-gray-300 max-w-none prose-ul:list-disc prose-ul:ml-5 prose-li:my-1 prose-strong:text-white leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: marked.parse(analysis.overallSummary) }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(analysis.overallSummary)) }}
               />
           </div>
+          {selectedCount > 0 && (
+            <div className="sticky bottom-4 inset-x-4 mt-8 p-3 bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-lg shadow-lg flex items-center justify-between gap-4">
+              <span className="font-semibold text-white">{selectedCount} исправлений выбрано</span>
+              <button 
+                onClick={onApplySelectedFixes}
+                disabled={isApplyingChanges}
+                className="flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed"
+              >
+                {isApplyingChanges ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Применение...
+                  </>
+                ) : (
+                  <>
+                    <WandIcon />
+                    Применить выбранные
+                  </>
+                )}
+              </button>
+            </div>
+          )}
       </div>
     );
   }

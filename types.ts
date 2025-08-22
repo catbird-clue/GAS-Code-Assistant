@@ -60,3 +60,14 @@ export interface ConversationTurn {
   question: string;
   answer: string;
 }
+
+export interface BatchInstruction {
+  fileName: string;
+  code: string | null;
+  instruction: string;
+}
+
+export interface BatchRefactorResult {
+  changes: RefactorChange[];
+  manualSteps: ManualStep[];
+}

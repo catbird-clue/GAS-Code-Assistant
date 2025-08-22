@@ -1,8 +1,8 @@
-import React, { useState, useCallback } from 'react';
-import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis } from './types';
+import React, { useState, useCallback, useEffect } from 'react';
+import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult } from './types';
 import FileUpload from './components/FileUpload';
 import AnalysisResult from './components/AnalysisResult';
-import { analyzeGasProject, refactorCode, updateChangelog, askQuestionAboutCode } from './services/geminiService';
+import { analyzeGasProject, refactorCode, updateChangelog, askQuestionAboutCode, batchRefactorCode } from './services/geminiService';
 import { GithubIcon, FileCodeIcon, WandIcon, DownloadIcon, XIcon } from './components/icons';
 import RefactorResultModal from './components/RefactorResultModal';
 import { Chat } from '@google/genai';
@@ -18,6 +18,8 @@ interface UndoState {
   frontendFiles: UploadedFile[];
   analysisResult: Analysis | null;
 }
+
+const MAX_UNDO_STACK_SIZE = 10;
 
 export default function App(): React.ReactNode {
   const [libraryFiles, setLibraryFiles] = useState<UploadedFile[]>([]);
@@ -41,7 +43,41 @@ export default function App(): React.ReactNode {
   const [chatSession, setChatSession] = useState<Chat | null>(null);
 
   const [autoReanalyze, setAutoReanalyze] = useState(false);
-  const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const [undoStack, setUndoStack] = useState<UndoState[]>([]);
+  
+  const [selectedFixes, setSelectedFixes] = useState<Record<string, {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}>>({});
+  const [changelogLang, setChangelogLang] = useState('ru');
+
+
+  useEffect(() => {
+    try {
+      const storedStack = localStorage.getItem('undoStack');
+      if (storedStack) {
+        setUndoStack(JSON.parse(storedStack));
+      }
+    } catch (e) {
+      console.error("Failed to load undo history:", e);
+      localStorage.removeItem('undoStack');
+    }
+  }, []);
+
+  const updateUndoStack = (newStack: UndoState[]) => {
+    setUndoStack(newStack);
+    try {
+      localStorage.setItem('undoStack', JSON.stringify(newStack));
+    } catch (e) {
+      console.error("Failed to save undo history:", e);
+    }
+  };
+
+  const pushToUndoStack = (state: UndoState) => {
+    const newStack = [...undoStack, state];
+    if (newStack.length > MAX_UNDO_STACK_SIZE) {
+      newStack.shift();
+    }
+    updateUndoStack(newStack);
+  };
+  
 
   const clearResults = () => {
     setAnalysisResult(null);
@@ -49,7 +85,7 @@ export default function App(): React.ReactNode {
     setChatSession(null);
     setAnalysisStats(null);
     setError(null);
-    setUndoState(null);
+    updateUndoStack([]);
   };
 
   const confirmFileChange = () => {
@@ -108,7 +144,7 @@ export default function App(): React.ReactNode {
     setAnalysisStats(null);
     setConversationHistory([]);
     setChatSession(null);
-    setUndoState(null);
+    updateUndoStack([]);
 
     const startTime = new Date();
     const totalLines = [...libraryFiles, ...frontendFiles].reduce((acc, file) => acc + (file.content ? file.content.split('\n').length : 0), 0);
@@ -149,13 +185,11 @@ export default function App(): React.ReactNode {
     
     setIsAnswering(true);
     setError(null);
-    // Clear analysis result when asking a question to show conversation view
     setAnalysisResult(null); 
     setNotification(null);
     setAnalysisStats(null);
-    setUndoState(null);
+    updateUndoStack([]);
 
-    // If it's a new conversation, clear history
     if (!chatSession) {
         setConversationHistory([]);
     }
@@ -187,7 +221,6 @@ export default function App(): React.ReactNode {
     setIsRefactorModalOpen(true);
     setIsRefactoring(true);
     setCurrentRefactor(null);
-    setUndoState(null);
     setNotification(null);
     setError(null);
 
@@ -214,41 +247,7 @@ export default function App(): React.ReactNode {
     }
   }, [libraryFiles, frontendFiles]);
 
-  const handleConfirmRefactor = async (result: RefactorResult) => {
-    setIsApplyingChanges(true);
-    setError(null);
-
-    if (!analysisResult || !refactoringRecommendation) {
-        setError("Не удалось применить исправление: отсутствует контекст анализа. Пожалуйста, попробуйте снова.");
-        setIsApplyingChanges(false);
-        setIsRefactorModalOpen(false);
-        return;
-    }
-
-    const fileAnalysis = analysisResult.libraryProject.find(f => f.fileName === refactoringRecommendation.fileName) 
-                       || analysisResult.frontendProject.find(f => f.fileName === refactoringRecommendation.fileName);
-
-    if (!fileAnalysis || !fileAnalysis.recommendations[refactoringRecommendation.recIndex]?.originalCodeSnippet) {
-        setError(`Не удалось найти исходную рекомендацию для исправления в ${refactoringRecommendation.fileName}.`);
-        setIsApplyingChanges(false);
-        return;
-    }
-    
-    // Save current state for undo
-    setUndoState({
-      libraryFiles: JSON.parse(JSON.stringify(libraryFiles)),
-      frontendFiles: JSON.parse(JSON.stringify(frontendFiles)),
-      analysisResult: JSON.parse(JSON.stringify(analysisResult))
-    });
-
-    const originalRecommendation = fileAnalysis.recommendations[refactoringRecommendation.recIndex];
-    
-    const mainChange = {
-        ...result.mainChange,
-        originalCodeSnippet: originalRecommendation.originalCodeSnippet,
-    };
-
-    const allChanges = [mainChange, ...result.relatedChanges];
+  const applyChangesToFiles = (allChanges: RefactorChange[]) => {
     const newLibraryFiles = JSON.parse(JSON.stringify(libraryFiles));
     const newFrontendFiles = JSON.parse(JSON.stringify(frontendFiles));
     
@@ -276,6 +275,7 @@ export default function App(): React.ReactNode {
         
         let patches: Patch[] = changes
             .map(change => {
+                if (!change.originalCodeSnippet) return null;
                 const index = currentContent.indexOf(change.originalCodeSnippet);
                 if (index === -1) {
                     console.warn(`Original code snippet not found in ${fileName}.`, { snippet: change.originalCodeSnippet });
@@ -316,9 +316,7 @@ export default function App(): React.ReactNode {
 
     if (totalAppliedCount === 0 && allChanges.length > 0) {
         setError("Ошибка: Ни одно из предложенных изменений не удалось применить. Оригинальный код для замены не был найден в файлах.");
-        setIsApplyingChanges(false);
-        setUndoState(null); // Revert undo state if nothing happened
-        return;
+        return { success: false };
     }
     
     if (failedFiles.size > 0) {
@@ -329,18 +327,61 @@ export default function App(): React.ReactNode {
     
     newLibraryFiles.forEach(file => { if (changedFileNames.has(file.name)) file.changesCount = (file.changesCount || 0) + 1; });
     newFrontendFiles.forEach(file => { if (changedFileNames.has(file.name)) file.changesCount = (file.changesCount || 0) + 1; });
+    
+    setLibraryFiles(newLibraryFiles);
+    setFrontendFiles(newFrontendFiles);
+
+    return { success: true, newLibraryFiles, newFrontendFiles, failedFiles };
+  };
+
+  const handleConfirmRefactor = async (result: RefactorResult) => {
+    setIsApplyingChanges(true);
+    setError(null);
+
+    if (!analysisResult || !refactoringRecommendation) {
+        setError("Не удалось применить исправление: отсутствует контекст анализа. Пожалуйста, попробуйте снова.");
+        setIsApplyingChanges(false);
+        setIsRefactorModalOpen(false);
+        return;
+    }
+
+    const fileAnalysis = analysisResult.libraryProject.find(f => f.fileName === refactoringRecommendation.fileName) 
+                       || analysisResult.frontendProject.find(f => f.fileName === refactoringRecommendation.fileName);
+
+    if (!fileAnalysis || !fileAnalysis.recommendations[refactoringRecommendation.recIndex]?.originalCodeSnippet) {
+        setError(`Не удалось найти исходную рекомендацию для исправления в ${refactoringRecommendation.fileName}.`);
+        setIsApplyingChanges(false);
+        return;
+    }
+    
+    pushToUndoStack({
+      libraryFiles: JSON.parse(JSON.stringify(libraryFiles)),
+      frontendFiles: JSON.parse(JSON.stringify(frontendFiles)),
+      analysisResult: JSON.parse(JSON.stringify(analysisResult))
+    });
+
+    const originalRecommendation = fileAnalysis.recommendations[refactoringRecommendation.recIndex];
+    
+    const mainChange = {
+        ...result.mainChange,
+        originalCodeSnippet: originalRecommendation.originalCodeSnippet,
+    };
+
+    const allChanges = [mainChange, ...result.relatedChanges];
+    const { success, newLibraryFiles, newFrontendFiles, failedFiles } = applyChangesToFiles(allChanges);
+    
+    if (!success) {
+        updateUndoStack(undoStack.slice(0, -1)); // Revert undo push
+        setIsApplyingChanges(false);
+        return;
+    }
 
     if (refactoringRecommendation) {
-        let changelogToUpdate: UploadedFile | undefined;
-        if (libraryFiles.some(f => f.name === refactoringRecommendation.fileName)) {
-            changelogToUpdate = newLibraryFiles.find(f => f.name.toLowerCase() === 'changelog.md');
-        } else {
-            changelogToUpdate = newFrontendFiles.find(f => f.name.toLowerCase() === 'changelog.md');
-        }
-        if (changelogToUpdate) {
+        const changelogFile = newLibraryFiles.find(f => f.name.toLowerCase() === 'changelog.md') || newFrontendFiles.find(f => f.name.toLowerCase() === 'changelog.md');
+        if (changelogFile) {
             try {
                 const changeDescription = `В файле \`${refactoringRecommendation.fileName}\`: ${fileAnalysis.recommendations[refactoringRecommendation.recIndex].suggestions[refactoringRecommendation.suggestionIndex].title}.`;
-                changelogToUpdate.content = await updateChangelog({ currentChangelog: changelogToUpdate.content, changeDescription });
+                changelogFile.content = await updateChangelog({ currentChangelog: changelogFile.content, changeDescription, language: changelogLang });
             } catch (e) {
                 console.error("Failed to update changelog:", e);
                 const currentError = error || "";
@@ -348,11 +389,7 @@ export default function App(): React.ReactNode {
             }
         }
     }
-
-    setLibraryFiles(newLibraryFiles);
-    setFrontendFiles(newFrontendFiles);
     
-    // Instead of resetting analysis, update it to mark the fix as applied
     const newAnalysisResult = JSON.parse(JSON.stringify(analysisResult));
     const fileInAnalysis = newAnalysisResult.libraryProject.find((f: FileAnalysis) => f.fileName === refactoringRecommendation.fileName) 
                       || newAnalysisResult.frontendProject.find((f: FileAnalysis) => f.fileName === refactoringRecommendation.fileName);
@@ -360,7 +397,7 @@ export default function App(): React.ReactNode {
         fileInAnalysis.recommendations[refactoringRecommendation.recIndex].appliedSuggestionIndex = refactoringRecommendation.suggestionIndex;
     }
     setAnalysisResult(newAnalysisResult);
-    setConversationHistory([]); // Clear chat history when fixes are applied
+    setConversationHistory([]);
 
     setNotification(`Изменения применены. Анализ может быть неактуальным.`);
     setIsApplyingChanges(false);
@@ -373,13 +410,87 @@ export default function App(): React.ReactNode {
     }
   };
 
+  const handleToggleFixSelection = (key: string, fixDetails: {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}) => {
+    setSelectedFixes(prev => {
+        const newSelection = {...prev};
+        if (newSelection[key]) {
+            delete newSelection[key];
+        } else {
+            newSelection[key] = fixDetails;
+        }
+        return newSelection;
+    });
+  };
+
+  const handleApplySelectedFixes = async () => {
+    setIsApplyingChanges(true);
+    setError(null);
+    setNotification(null);
+    if (Object.keys(selectedFixes).length === 0) {
+        setError("Не выбрано ни одного исправления.");
+        setIsApplyingChanges(false);
+        return;
+    }
+
+    const instructions = Object.values(selectedFixes).map(fix => ({
+      fileName: fix.fileName,
+      code: fix.rec.originalCodeSnippet,
+      instruction: `${fix.rec.description}\n\nКонкретное предложение: ${fix.rec.suggestions[fix.suggestionIndex].title} - ${fix.rec.suggestions[fix.suggestionIndex].description}`
+    }));
+
+    try {
+      const result: BatchRefactorResult = await batchRefactorCode({
+        instructions,
+        libraryFiles,
+        frontendFiles,
+      });
+
+      pushToUndoStack({
+        libraryFiles: JSON.parse(JSON.stringify(libraryFiles)),
+        frontendFiles: JSON.parse(JSON.stringify(frontendFiles)),
+        analysisResult: JSON.parse(JSON.stringify(analysisResult))
+      });
+
+      const { success } = applyChangesToFiles(result.changes);
+
+      if (!success) {
+          updateUndoStack(undoStack.slice(0, -1)); // Revert undo push
+          setIsApplyingChanges(false);
+          return;
+      }
+      
+      const newAnalysisResult = JSON.parse(JSON.stringify(analysisResult));
+      Object.values(selectedFixes).forEach(fix => {
+          const fileInAnalysis = newAnalysisResult.libraryProject.find((f: FileAnalysis) => f.fileName === fix.fileName) 
+                            || newAnalysisResult.frontendProject.find((f: FileAnalysis) => f.fileName === fix.fileName);
+          if (fileInAnalysis) {
+              fileInAnalysis.recommendations[fix.recIndex].appliedSuggestionIndex = fix.suggestionIndex;
+          }
+      });
+      setAnalysisResult(newAnalysisResult);
+      setSelectedFixes({});
+      setNotification(`${Object.keys(selectedFixes).length} исправлений применено.`);
+
+    } catch(e) {
+      console.error(e);
+      setError(e instanceof Error ? e.message : "Произошла неизвестная ошибка при пакетном применении исправлений.");
+    } finally {
+      setIsApplyingChanges(false);
+    }
+  };
+
+
   const handleUndo = () => {
-    if (undoState) {
-        setLibraryFiles(undoState.libraryFiles);
-        setFrontendFiles(undoState.frontendFiles);
-        setAnalysisResult(undoState.analysisResult);
-        setUndoState(null);
-        setNotification("Последнее изменение было отменено.");
+    if (undoStack.length > 0) {
+        const newStack = [...undoStack];
+        const lastState = newStack.pop();
+        if (lastState) {
+            setLibraryFiles(lastState.libraryFiles);
+            setFrontendFiles(lastState.frontendFiles);
+            setAnalysisResult(lastState.analysisResult);
+            updateUndoStack(newStack);
+            setNotification("Последнее изменение было отменено.");
+        }
     }
   };
 
@@ -561,7 +672,7 @@ export default function App(): React.ReactNode {
                         )}
                       </button>
                   </div>
-                   <div className="mt-2">
+                   <div className="mt-2 space-y-2">
                       <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
                           <input 
                               type="checkbox"
@@ -571,6 +682,18 @@ export default function App(): React.ReactNode {
                           />
                           Автоматически запускать повторный анализ после применения исправлений
                       </label>
+                      <div className="flex items-center gap-2 text-sm text-gray-400">
+                          <label htmlFor="changelog-lang">Язык CHANGELOG:</label>
+                          <select 
+                            id="changelog-lang"
+                            value={changelogLang}
+                            onChange={(e) => setChangelogLang(e.target.value)}
+                            className="bg-gray-700 border-gray-600 rounded text-white text-xs p-1 focus:ring-indigo-500 focus:border-indigo-500"
+                          >
+                            <option value="ru">Русский</option>
+                            <option value="en">English</option>
+                          </select>
+                      </div>
                   </div>
               </div>
           </div>
@@ -594,7 +717,11 @@ export default function App(): React.ReactNode {
               conversationHistory={conversationHistory}
               isAnswering={isAnswering}
               onUndo={handleUndo}
-              canUndo={!!undoState}
+              canUndo={undoStack.length > 0}
+              selectedFixes={selectedFixes}
+              onToggleFixSelection={handleToggleFixSelection}
+              onApplySelectedFixes={handleApplySelectedFixes}
+              isApplyingChanges={isApplyingChanges}
             />
           </div>
         </div>
