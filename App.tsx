@@ -1,4 +1,6 @@
 
+
+
 import React, from 'react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult, FailedChange, ModelName } from './types';
@@ -6,17 +8,11 @@ import FileUpload from './components/FileUpload';
 import AnalysisResult from './components/AnalysisResult';
 import ChatView from './components/ChatView';
 import { analyzeGasProject, refactorCode, updateChangelog, askQuestionAboutCode, batchRefactorCode, correctRefactorResult } from './services/geminiService';
-import { GithubIcon, FileCodeIcon, WandIcon, DownloadIcon, XIcon, BeakerIcon, HelpIcon, ResetIcon } from './components/icons';
+import { GithubIcon, FileCodeIcon, WandIcon, DownloadIcon, XIcon, BeakerIcon, HelpIcon } from './components/icons';
 import RefactorResultModal from './components/RefactorResultModal';
 import { Chat } from '@google/genai';
 import HelpModal from './components/HelpModal';
 import { useTranslation } from './I18nContext';
-
-interface Patch {
-  index: number;
-  originalLength: number;
-  change: RefactorChange;
-}
 
 interface UndoState {
   libraryFiles: UploadedFile[];
@@ -24,43 +20,14 @@ interface UndoState {
   analysisResult: Analysis | null;
 }
 
-interface AppState {
-  libraryFiles: UploadedFile[];
-  frontendFiles: UploadedFile[];
-  analysisResult: Analysis | null;
-}
-
 const MAX_UNDO_STACK_SIZE = 10;
-
-const getInitialState = (): AppState => {
-  try {
-    const savedState = localStorage.getItem('gasCodeAnalyzerState');
-    if (savedState) {
-      const parsed = JSON.parse(savedState);
-      return {
-        libraryFiles: parsed.libraryFiles || [],
-        frontendFiles: parsed.frontendFiles || [],
-        analysisResult: parsed.analysisResult || null,
-      };
-    }
-  } catch (e) {
-    console.error("Failed to load saved state:", e);
-    localStorage.removeItem('gasCodeAnalyzerState');
-  }
-  return {
-    libraryFiles: [],
-    frontendFiles: [],
-    analysisResult: null,
-  };
-};
-
 
 export default function App(): React.ReactNode {
   const { language, setLanguage, t } = useTranslation();
-  const [libraryFiles, setLibraryFiles] = useState<UploadedFile[]>(getInitialState().libraryFiles);
-  const [frontendFiles, setFrontendFiles] = useState<UploadedFile[]>(getInitialState().frontendFiles);
+  const [libraryFiles, setLibraryFiles] = useState<UploadedFile[]>([]);
+  const [frontendFiles, setFrontendFiles] = useState<UploadedFile[]>([]);
 
-  const [analysisResult, setAnalysisResult] = useState<Analysis | null>(getInitialState().analysisResult);
+  const [analysisResult, setAnalysisResult] = useState<Analysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
@@ -83,24 +50,8 @@ export default function App(): React.ReactNode {
   
   const [selectedFixes, setSelectedFixes] = useState<Record<string, {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}>>({});
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
-  const [isTestRunPending, setIsTestRunPending] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [modelName, setModelName] = useState<ModelName>('gemini-2.5-flash');
-
-  // Save state to localStorage on change
-  useEffect(() => {
-    try {
-      const stateToSave: AppState = {
-        libraryFiles,
-        frontendFiles,
-        analysisResult
-      };
-      localStorage.setItem('gasCodeAnalyzerState', JSON.stringify(stateToSave));
-    } catch (e) {
-      console.error("Failed to save state:", e);
-    }
-  }, [libraryFiles, frontendFiles, analysisResult]);
-
 
   const pushToUndoStack = (state: UndoState) => {
     const newStack = [...undoStack, state];
@@ -122,56 +73,33 @@ export default function App(): React.ReactNode {
   };
 
   const handleLibraryFilesUploaded = (uploadedFiles: UploadedFile[]) => {
-    if (libraryFiles.length > 0 && analysisResult) {
+    if (libraryFiles.length > 0) {
        if (!window.confirm(t('replaceLibraryWarning'))) {
         return;
       }
     }
     setLibraryFiles(uploadedFiles);
-    if(analysisResult) clearAnalysisAndChat();
+    clearAnalysisAndChat();
   };
   
   const handleFrontendFilesUploaded = (uploadedFiles: UploadedFile[]) => {
-     if (frontendFiles.length > 0 && analysisResult) {
+     if (frontendFiles.length > 0) {
        if (!window.confirm(t('replaceFrontendWarning'))) {
         return;
       }
     }
     setFrontendFiles(uploadedFiles);
-    if(analysisResult) clearAnalysisAndChat();
-  };
-
-  const handleClearLibraryFiles = () => {
-    if (window.confirm(t('clearLibraryWarning'))) {
-        setLibraryFiles([]);
-        clearAnalysisAndChat();
-    }
-  }
-  
-  const handleClearFrontendFiles = () => {
-    if (window.confirm(t('clearFrontendWarning'))) {
-        setFrontendFiles([]);
-        clearAnalysisAndChat();
-    }
-  }
-  
-  const handleResetSession = () => {
-    if (window.confirm(t('resetSessionWarning'))) {
-        setLibraryFiles([]);
-        setFrontendFiles([]);
-        clearAnalysisAndChat();
-        setNotification(t('sessionResetNotification'));
-    }
+    clearAnalysisAndChat();
   };
 
   const handleRemoveLibraryFile = (indexToRemove: number) => {
     setLibraryFiles(prev => prev.filter((_, index) => index !== indexToRemove));
-    if(analysisResult) clearAnalysisAndChat();
+    clearAnalysisAndChat();
   };
   
   const handleRemoveFrontendFile = (indexToRemove: number) => {
     setFrontendFiles(prev => prev.filter((_, index) => index !== indexToRemove));
-    if(analysisResult) clearAnalysisAndChat();
+    clearAnalysisAndChat();
   };
 
   const handleAnalyze = useCallback(async () => {
@@ -315,6 +243,11 @@ export default function App(): React.ReactNode {
         }
 
         let currentContent = fileList[fileIndex].content;
+        interface Patch {
+          index: number;
+          originalLength: number;
+          change: RefactorChange;
+        }
         const appliedPatches: Patch[] = [];
 
         changes.forEach(change => {
@@ -493,7 +426,7 @@ export default function App(): React.ReactNode {
     setNotification(null);
     setError(null);
     
-    const instructions: {fileName: string, code: string, instruction: string}[] = fixesToApply.map(fix => {
+    const instructions = fixesToApply.map(fix => {
         const suggestion = fix.rec.suggestions[fix.suggestionIndex];
         return {
             fileName: fix.fileName,
@@ -599,14 +532,6 @@ export default function App(): React.ReactNode {
         </div>
         <div className="flex items-center gap-2">
             <button
-              onClick={handleResetSession}
-              className="p-2 rounded-md hover:bg-gray-700 transition-colors"
-              title={t('resetSession')}
-              aria-label={t('resetSession')}
-            >
-              <ResetIcon />
-            </button>
-            <button
               onClick={() => setIsHelpModalOpen(true)}
               className="p-2 rounded-md hover:bg-gray-700 transition-colors"
               title={t('help')}
@@ -636,8 +561,9 @@ export default function App(): React.ReactNode {
               <div className="mb-6">
                   <h2 className="text-lg font-semibold mb-2 text-indigo-300">{t('libraryProjectTitle')}</h2>
                   <p className="text-sm text-gray-400 mb-3">{t('libraryProjectDescription')}</p>
-                  <FileUpload onFilesUploaded={handleLibraryFilesUploaded} setError={setError} />
-                  {libraryFiles.length > 0 && (
+                  {libraryFiles.length === 0 ? (
+                    <FileUpload onFilesUploaded={handleLibraryFilesUploaded} setError={setError} />
+                  ) : (
                       <div className="mt-4 space-y-2">
                           {libraryFiles.map((file, index) => (
                               <div key={index} className="bg-gray-800/50 p-2 rounded-md flex justify-between items-center text-sm">
@@ -652,15 +578,15 @@ export default function App(): React.ReactNode {
                                   </div>
                               </div>
                           ))}
-                          <button onClick={handleClearLibraryFiles} className="text-sm text-gray-500 hover:text-red-400 transition-colors w-full mt-2">{t('clearFiles')}</button>
                       </div>
                   )}
               </div>
               <div>
                   <h2 className="text-lg font-semibold mb-2 text-indigo-300">{t('frontendProjectTitle')}</h2>
                   <p className="text-sm text-gray-400 mb-3">{t('frontendProjectDescription')}</p>
-                  <FileUpload onFilesUploaded={handleFrontendFilesUploaded} setError={setError} />
-                  {frontendFiles.length > 0 && (
+                  {frontendFiles.length === 0 ? (
+                    <FileUpload onFilesUploaded={handleFrontendFilesUploaded} setError={setError} />
+                  ) : (
                       <div className="mt-4 space-y-2">
                           {frontendFiles.map((file, index) => (
                              <div key={index} className="bg-gray-800/50 p-2 rounded-md flex justify-between items-center text-sm">
@@ -675,7 +601,6 @@ export default function App(): React.ReactNode {
                                   </div>
                               </div>
                           ))}
-                           <button onClick={handleClearFrontendFiles} className="text-sm text-gray-500 hover:text-red-400 transition-colors w-full mt-2">{t('clearFiles')}</button>
                       </div>
                   )}
               </div>
@@ -690,7 +615,7 @@ export default function App(): React.ReactNode {
                         className="w-full flex-grow bg-indigo-600 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                         {isAnalyzing && (
-                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
@@ -707,6 +632,7 @@ export default function App(): React.ReactNode {
                         className="bg-gray-700 border-gray-600 rounded-md p-1.5 text-white text-xs focus:ring-indigo-500 focus:border-indigo-500"
                     >
                         <option value="gemini-2.5-flash">{t('flashModel')}</option>
+                        <option value="gemini-2.5-pro">{t('proModel')}</option>
                     </select>
                 </div>
               </div>
@@ -714,7 +640,7 @@ export default function App(): React.ReactNode {
         </div>
         
         {/* Right Panel */}
-        <div className="flex-1 flex flex-col bg-gray-800/20">
+        <div className="flex-1 flex flex-col bg-gray-800/20 min-w-0">
             <div className="border-b border-gray-700 flex-shrink-0">
                 <div className="flex p-1">
                     <button 
@@ -748,7 +674,6 @@ export default function App(): React.ReactNode {
                         onToggleFixSelection={handleToggleFixSelection}
                         onApplySelectedFixes={handleApplySelectedFixes}
                         isApplyingChanges={isApplyingChanges}
-                        setSelectedFixes={setSelectedFixes}
                     />
                 ) : (
                     <ChatView 

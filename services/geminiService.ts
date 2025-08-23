@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type, Chat } from "@google/genai";
 import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation, FailedChange, ModelName } from '../types';
 import { Language } from "../I18nContext";
@@ -41,7 +42,6 @@ const getSchemas = (language: Language) => {
                   type: Type.OBJECT,
                   properties: {
                     description: { type: Type.STRING, description: isRussian ? "Общее описание проблемы." : "A general description of the issue." },
-                    severity: { type: Type.STRING, description: isRussian ? 'Серьезность проблемы ("low", "medium", "high").' : 'The severity of the issue ("low", "medium", "high").' },
                     originalCodeSnippet: { type: Type.STRING, description: isRussian ? "Оригинальный фрагмент кода, который нужно исправить. Null, если не применимо." : "The original code snippet to be fixed. Null if not applicable." },
                     suggestions: {
                       type: Type.ARRAY,
@@ -57,7 +57,7 @@ const getSchemas = (language: Language) => {
                       }
                     }
                   },
-                  required: ['description', 'severity', 'originalCodeSnippet', 'suggestions']
+                  required: ['description', 'originalCodeSnippet', 'suggestions']
                 }
               }
             },
@@ -78,7 +78,6 @@ const getSchemas = (language: Language) => {
                   type: Type.OBJECT,
                   properties: {
                     description: { type: Type.STRING, description: isRussian ? "Общее описание проблемы." : "A general description of the issue." },
-                    severity: { type: Type.STRING, description: isRussian ? 'Серьезность проблемы ("low", "medium", "high").' : 'The severity of the issue ("low", "medium", "high").' },
                     originalCodeSnippet: { type: Type.STRING, description: isRussian ? "Оригинальный фрагмент кода, который нужно исправить. Null, если не применимо." : "The original code snippet to be fixed. Null if not applicable." },
                     suggestions: {
                       type: Type.ARRAY,
@@ -94,7 +93,7 @@ const getSchemas = (language: Language) => {
                       }
                     }
                   },
-                  required: ['description', 'severity', 'originalCodeSnippet', 'suggestions']
+                  required: ['description', 'originalCodeSnippet', 'suggestions']
                 }
               }
             },
@@ -197,15 +196,14 @@ Analyze them with this relationship in mind.
 **Instructions:**
 1.  **Analyze Holistically:** Review all files to understand the project's overall purpose and architecture.
 2.  **File-by-File Analysis:** For each file in both the library and frontend projects, provide a list of actionable recommendations.
-3.  **Assign Severity:** For each recommendation, assign a 'severity' level: "high" for critical issues (bugs, security risks), "medium" for best practice violations, and "low" for stylistic or minor suggestions.
-4.  **Provide Actionable Suggestions:** For each recommendation involving code changes, you MUST extract the \`originalCodeSnippet\` from the user's file.
+3.  **Provide Actionable Suggestions:** For each recommendation involving code changes, you MUST extract the \`originalCodeSnippet\` from the user's file.
     - **CRITICAL:** The \`originalCodeSnippet\` must be a complete, self-contained block of code (e.g., a full function definition from \`function\` to its closing \`}\`).
     - **CRITICAL:** It must be an **exact, character-for-character copy** from the user's file. Do not change anything, including indentation, whitespace, or comments.
     - **CRITICAL:** The \`originalCodeSnippet\` **MUST NOT** contain any of your suggested changes or new code. It is only for identifying the code to be replaced.
-5.  **Handle Multiple Solutions:** If a problem has multiple valid solutions (e.g., 'do A or do B'), list each one as a separate suggestion object in the \`suggestions\` array. Each suggestion must have a clear \`title\`, a \`description\` of the approach, and the corresponding \`correctedCodeSnippet\`. If there is only one solution, the \`suggestions\` array should still contain one object.
-6.  **Handle General Advice:** If a recommendation is general and doesn't apply to a specific block of code, the \`originalCodeSnippet\` field should be null, and the \`suggestions\` array should be empty.
-7.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
-8.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
+4.  **Handle Multiple Solutions:** If a problem has multiple valid solutions (e.g., 'do A or do B'), list each one as a separate suggestion object in the \`suggestions\` array. Each suggestion must have a clear \`title\`, a \`description\` of the approach, and the corresponding \`correctedCodeSnippet\`. If there is only one solution, the \`suggestions\` array should still contain one object.
+5.  **Handle General Advice:** If a recommendation is general and doesn't apply to a specific block of code, the \`originalCodeSnippet\` field should be null, and the \`suggestions\` array should be empty.
+6.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
+7.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
 
 Here are the project files:
 

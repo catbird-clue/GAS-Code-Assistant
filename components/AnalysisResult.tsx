@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import CodeBlock from './CodeBlock';
 import { Analysis, FileAnalysis, Recommendation, SuggestedFix, AnalysisStats } from '../types';
@@ -7,7 +8,6 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { useTranslation } from '../I18nContext';
 
-type Severity = 'low' | 'medium' | 'high';
 
 interface AnalysisResultProps {
   analysis: Analysis | null;
@@ -23,30 +23,27 @@ interface AnalysisResultProps {
   onToggleFixSelection: (key: string, fixDetails: {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}) => void;
   onApplySelectedFixes: () => void;
   isApplyingChanges: boolean;
-  setSelectedFixes: React.Dispatch<React.SetStateAction<Record<string, any>>>;
 }
 
-const AnalysisSummary: React.FC<{ analysis: Analysis }> = React.memo(({ analysis }) => {
+const AnalysisSummary: React.FC<{ analysis: Analysis }> = ({ analysis }) => {
   const { t } = useTranslation();
-  const stats = React.useMemo(() => {
-    let totalRecommendations = 0;
-    let appliedFixes = 0;
+  const stats = {
+    totalRecommendations: 0,
+    appliedFixes: 0
+  };
 
-    const allFiles = [...analysis.libraryProject, ...analysis.frontendProject];
-    
-    for (const file of allFiles) {
-      if(file.recommendations) {
-        totalRecommendations += file.recommendations.length;
-        for (const rec of file.recommendations) {
-          if (rec.appliedSuggestionIndex !== undefined) {
-            appliedFixes++;
-          }
+  const allFiles = [...analysis.libraryProject, ...analysis.frontendProject];
+  
+  for (const file of allFiles) {
+    if(file.recommendations) {
+      stats.totalRecommendations += file.recommendations.length;
+      for (const rec of file.recommendations) {
+        if (rec.appliedSuggestionIndex !== undefined) {
+          stats.appliedFixes++;
         }
       }
     }
-
-    return { totalRecommendations, appliedFixes };
-  }, [analysis]);
+  }
   
    const generateMarkdownReport = (analysis: Analysis): string => {
     let mdContent = `# ${t('reportTitle_md')}\n\n`;
@@ -62,7 +59,6 @@ const AnalysisSummary: React.FC<{ analysis: Analysis }> = React.memo(({ analysis
         mdContent += `### ${t('file_md')}: \`${file.fileName}\`\n\n`;
         file.recommendations.forEach((rec, recIndex) => {
           mdContent += `#### ${t('recommendation_md')} ${recIndex + 1}${rec.appliedSuggestionIndex !== undefined ? ` (${t('applied_md')})` : ''}\n\n`;
-          mdContent += `**${t('severity')}:** ${rec.severity}\n\n`;
           mdContent += `${rec.description}\n\n`;
           if (rec.originalCodeSnippet) {
             mdContent += `##### ${t('problemCode_md')}:\n`;
@@ -142,7 +138,7 @@ const AnalysisSummary: React.FC<{ analysis: Analysis }> = React.memo(({ analysis
           </button>
     </div>
   );
-});
+};
 
 const formatDuration = (seconds: number | null, t: (key: string, params?: any) => string): string => {
   if (seconds === null || isNaN(seconds)) return 'N/A';
@@ -156,7 +152,7 @@ const formatDuration = (seconds: number | null, t: (key: string, params?: any) =
   return result.trim();
 };
 
-const AnalysisMetrics: React.FC<{ stats: AnalysisStats }> = React.memo(({ stats }) => {
+const AnalysisMetrics: React.FC<{ stats: AnalysisStats }> = ({ stats }) => {
   const { t, language } = useTranslation();
   return (
     <div className="bg-gray-900/50 border border-gray-700 rounded-lg p-4 mb-6 text-sm text-gray-400 grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -178,7 +174,7 @@ const AnalysisMetrics: React.FC<{ stats: AnalysisStats }> = React.memo(({ stats 
       </div>
     </div>
   );
-});
+};
 
 
 const SuggestionCard: React.FC<{
@@ -189,7 +185,7 @@ const SuggestionCard: React.FC<{
     language: string;
     isSelected: boolean;
     onToggleSelection: () => void;
-}> = React.memo(({ suggestion, isApplied, isAnyApplied, onApply, language, isSelected, onToggleSelection }) => {
+}> = ({ suggestion, isApplied, isAnyApplied, onApply, language, isSelected, onToggleSelection }) => {
     const { t } = useTranslation();
     return (
         <div className={`mt-4 p-4 rounded-lg border relative ${isApplied ? 'border-green-700 bg-green-900/20' : isSelected ? 'border-indigo-500 bg-indigo-900/20' : 'border-gray-700 bg-gray-900/50'}`}>
@@ -227,40 +223,8 @@ const SuggestionCard: React.FC<{
             )}
         </div>
     );
-});
-
-
-const getLanguageFromFileName = (fileName: string): string => {
-    const extension = fileName.split('.').pop()?.toLowerCase();
-    switch (extension) {
-        case 'gs':
-        case 'js':
-            return 'javascript';
-        case 'html':
-            return 'html';
-        case 'json':
-            return 'json';
-        case 'md':
-            return 'markdown';
-        default:
-            return 'plaintext';
-    }
 };
 
-const severityStyles = {
-    high: {
-        border: 'border-red-700/60',
-        label: 'text-red-400',
-    },
-    medium: {
-        border: 'border-yellow-600/60',
-        label: 'text-yellow-400',
-    },
-    low: {
-        border: 'border-sky-700/60',
-        label: 'text-sky-400',
-    },
-};
 
 const RecommendationCard: React.FC<{ 
     fileName: string; 
@@ -269,7 +233,7 @@ const RecommendationCard: React.FC<{
     onApplyFix: AnalysisResultProps['onApplyFix'];
     selectedFixes: AnalysisResultProps['selectedFixes'];
     onToggleFixSelection: AnalysisResultProps['onToggleFixSelection'];
-}> = React.memo(({ fileName, recommendation, recIndex, onApplyFix, selectedFixes, onToggleFixSelection }) => {
+}> = ({ fileName, recommendation, recIndex, onApplyFix, selectedFixes, onToggleFixSelection }) => {
   const { t } = useTranslation();
   
   const handleFix = (suggestionIndex: number) => {
@@ -283,12 +247,10 @@ const RecommendationCard: React.FC<{
 
   const hasSuggestions = recommendation.suggestions && recommendation.suggestions.length > 0;
   const isAnySuggestionApplied = recommendation.appliedSuggestionIndex !== undefined;
-  const language = getLanguageFromFileName(fileName);
-  const severity = recommendation.severity || 'medium';
-  const style = severityStyles[severity] || severityStyles.medium;
+  const language = fileName.endsWith('.html') ? 'html' : 'javascript';
 
   return (
-    <div className={`bg-gray-800/50 p-4 rounded-lg border ${isAnySuggestionApplied ? 'border-green-800/50' : style.border} mb-4`}>
+    <div className={`bg-gray-800/50 p-4 rounded-lg border ${isAnySuggestionApplied ? 'border-green-800/50' : 'border-gray-700'} mb-4`}>
        <div className="flex justify-between items-center mb-2">
             {isAnySuggestionApplied ? (
               <div className="text-xs font-bold text-green-400 uppercase flex items-center gap-2">
@@ -296,9 +258,7 @@ const RecommendationCard: React.FC<{
                 {t('fixApplied')}
               </div>
             ) : (
-                 <div className={`text-xs font-bold uppercase ${style.label}`}>
-                    {t(severity)} {t('severity')}
-                </div>
+                <div></div>
             )}
        </div>
 
@@ -332,7 +292,7 @@ const RecommendationCard: React.FC<{
       )}
     </div>
   );
-});
+};
 
 
 const FileAnalysisCard: React.FC<{ 
@@ -340,7 +300,7 @@ const FileAnalysisCard: React.FC<{
     onApplyFix: AnalysisResultProps['onApplyFix'];
     selectedFixes: AnalysisResultProps['selectedFixes'];
     onToggleFixSelection: AnalysisResultProps['onToggleFixSelection'];
-}> = React.memo(({ fileAnalysis, onApplyFix, selectedFixes, onToggleFixSelection }) => (
+}> = ({ fileAnalysis, onApplyFix, selectedFixes, onToggleFixSelection }) => (
   <div className="mb-6">
     <h3 className="text-lg font-semibold mt-6 mb-3 text-indigo-300 border-b border-gray-700 pb-2">{fileAnalysis.fileName}</h3>
     {fileAnalysis.recommendations.map((rec, index) => (
@@ -355,61 +315,11 @@ const FileAnalysisCard: React.FC<{
       />
     ))}
   </div>
-));
+);
 
-const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, hasFiles, onApplyFix, notification, onDismissNotification, analysisStats, onUndo, canUndo, selectedFixes, onToggleFixSelection, onApplySelectedFixes, isApplyingChanges, setSelectedFixes }) => {
-  const [severityFilter, setSeverityFilter] = React.useState<Severity | 'all'>('all');
+const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, hasFiles, onApplyFix, notification, onDismissNotification, analysisStats, onUndo, canUndo, selectedFixes, onToggleFixSelection, onApplySelectedFixes, isApplyingChanges }) => {
   const { t } = useTranslation();
   const selectedCount = Object.keys(selectedFixes).length;
-  
-  const filteredAnalysis = React.useMemo(() => {
-    if (!analysis) return null;
-    if (severityFilter === 'all') return analysis;
-
-    const filterRecs = (recs: Recommendation[]) => recs.filter(r => r.severity === severityFilter);
-
-    const filterProject = (project: FileAnalysis[]) => 
-      project.map(file => ({
-        ...file,
-        recommendations: filterRecs(file.recommendations),
-      })).filter(file => file.recommendations.length > 0);
-      
-    return {
-      ...analysis,
-      libraryProject: filterProject(analysis.libraryProject),
-      frontendProject: filterProject(analysis.frontendProject),
-    };
-  }, [analysis, severityFilter]);
-  
-  const handleSelectAllVisible = () => {
-    if (!filteredAnalysis) return;
-
-    const allVisibleFixes: Record<string, any> = {};
-    
-    const projects = [
-        ...filteredAnalysis.libraryProject,
-        ...filteredAnalysis.frontendProject
-    ];
-
-    projects.forEach(file => {
-        file.recommendations.forEach((rec, recIndex) => {
-            if (rec.appliedSuggestionIndex === undefined) {
-                rec.suggestions.forEach((_, suggestionIndex) => {
-                    const key = `${file.fileName}|${recIndex}|${suggestionIndex}`;
-                    allVisibleFixes[key] = { fileName: file.fileName, rec, recIndex, suggestionIndex };
-                });
-            }
-        });
-    });
-    
-    // If all visible are already selected, deselect all. Otherwise, select all.
-    if (Object.keys(allVisibleFixes).length === selectedCount) {
-        setSelectedFixes({});
-    } else {
-        setSelectedFixes(allVisibleFixes);
-    }
-  };
-
 
   if (isLoading) {
     return (
@@ -447,40 +357,17 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
         <AnalysisSummary analysis={analysis} />
         <div className="p-4 md:p-6 text-base max-w-none relative">
             {analysisStats && <AnalysisMetrics stats={analysisStats} />}
-            
-            <div className="mb-6 bg-gray-800/50 p-3 rounded-lg border border-gray-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="font-semibold text-gray-300">{t('severity')}:</span>
-                <div className="flex items-center gap-1 bg-gray-900 p-1 rounded-md">
-                  {(['all', 'high', 'medium', 'low'] as const).map(level => (
-                    <button
-                      key={level}
-                      onClick={() => setSeverityFilter(level)}
-                      className={`px-3 py-1 text-sm font-semibold rounded-md transition-colors ${severityFilter === level ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-700/50'}`}
-                    >
-                      {t(level)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <button 
-                onClick={handleSelectAllVisible}
-                className="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-1.5 rounded-md text-sm transition-colors"
-              >
-                {selectedCount > 0 ? t('deselectAll') : t('selectAll')}
-              </button>
-            </div>
     
-            {filteredAnalysis && filteredAnalysis.libraryProject.length > 0 && (
+            {analysis.libraryProject.length > 0 && (
                 <div className="mb-8">
                     <h2 className="text-xl font-bold mt-4 mb-4 text-white">{t('libraryProjectTitle')}</h2>
-                    {filteredAnalysis.libraryProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
+                    {analysis.libraryProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
                 </div>
             )}
-            {filteredAnalysis && filteredAnalysis.frontendProject.length > 0 && (
+            {analysis.frontendProject.length > 0 && (
                   <div className="mb-8">
                     <h2 className="text-xl font-bold mt-8 mb-4 text-white">{t('frontendProjectTitle')}</h2>
-                    {filteredAnalysis.frontendProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
+                    {analysis.frontendProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
                 </div>
             )}
             <div>
@@ -535,4 +422,4 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
   );
 };
 
-export default React.memo(AnalysisResult);
+export default AnalysisResult;

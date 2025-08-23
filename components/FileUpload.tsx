@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useRef } from 'react';
 import { UploadedFile } from '../types';
 import { UploadIcon } from './icons';
@@ -9,9 +10,7 @@ interface FileUploadProps {
   setError: (error: string | null) => void;
 }
 
-const MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024; // 1MB
-
-const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded, setError }) => {
+const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
   const { t } = useTranslation();
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -29,27 +28,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded, setError }) =>
   };
 
   const processFiles = useCallback(async (files: FileList) => {
-    const fileArray = Array.from(files);
-    const validFiles: File[] = [];
-    
-    setError(null);
-
-    for (const file of fileArray) {
-      if (file.size > MAX_FILE_SIZE_BYTES) {
-        setError(t('fileTooLargeError', { fileName: file.name }));
-        // We show the error but continue processing other valid files.
-      } else {
-        validFiles.push(file);
-      }
-    }
-    
-    if (validFiles.length === 0) {
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        return;
-    }
-
+    if (files.length === 0) return;
     try {
-      const uploadedFiles = await Promise.all(validFiles.map(handleFileRead));
+      const uploadedFiles = await Promise.all(Array.from(files).map(handleFileRead));
       onFilesUploaded(uploadedFiles);
     } catch (error) {
       console.error("Error reading files:", error);
@@ -58,7 +39,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded, setError }) =>
         fileInputRef.current.value = '';
       }
     }
-  }, [onFilesUploaded, setError, t]);
+  }, [onFilesUploaded]);
 
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();

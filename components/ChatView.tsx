@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { ConversationTurn } from '../types';
 import AnswerBlock from './AnswerBlock';
@@ -90,4 +91,4 @@ const ChatView: React.FC<ChatViewProps> = ({ conversationHistory, isAnswering })
   );
 };
 
-export default React.memo(ChatView);
+export default ChatView;

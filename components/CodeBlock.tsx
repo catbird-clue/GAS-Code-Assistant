@@ -1,4 +1,5 @@
 
+
 import React, { useState } from 'react';
 import { CopyIcon, CheckIcon } from './icons';
 
@@ -7,7 +8,7 @@ interface CodeBlockProps {
   language?: string;
 }
 
-const CodeBlock: React.FC<CodeBlockProps> = ({ children, language = 'plaintext' }) => {
+const CodeBlock: React.FC<CodeBlockProps> = ({ children, language = 'javascript' }) => {
     const [isCopied, setIsCopied] = useState(false);
 
     const handleCopy = () => {

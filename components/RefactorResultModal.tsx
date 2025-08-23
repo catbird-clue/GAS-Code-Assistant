@@ -78,7 +78,11 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
         gutterBackground: '#1f2937',
         gutterColor: '#6b7280'
       }
-    }
+    },
+    diffContainer: {
+        width: '100%',
+        tableLayout: 'fixed',
+    },
   };
 
   return (

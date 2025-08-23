@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { XIcon } from './icons';
 import { marked } from 'marked';
@@ -36,17 +37,6 @@ This tool is an intelligent assistant designed to analyze, refactor, and improve
 ---
 
 # Changelog
-
-## [1.3.0] - 2025-05-30
-### Added
-- Implemented application state persistence in the browser's local storage to prevent data loss on page refresh.
-- Added severity filters (low, medium, high) to the analysis results pane.
-- Added a "Select all" / "Deselect all" button for easier batch application of fixes.
-- Added a 1MB file size limit per file to prevent browser crashes on large uploads.
-
-### Changed
-- Improved performance by wrapping key components with \`React.memo\` to prevent unnecessary re-renders.
-- Improved code syntax highlighting by dynamically detecting the language from file extensions (.gs, .html, etc.).
 
 ## [1.2.0] - 2025-05-29
 ### Added
@@ -95,17 +85,6 @@ const helpContentRu = `
 ---
 
 # Журнал изменений
-
-## [1.3.0] - 2025-05-30
-### Добавлено
-- Реализовано сохранение состояния приложения в локальном хранилище браузера для предотвращения потери данных при обновлении страницы.
-- Добавлены фильтры по важности (низкая, средняя, высокая) в панель результатов анализа.
-- Добавлена кнопка "Выбрать все" / "Снять выбор" для упрощения пакетного применения исправлений.
-- Добавлено ограничение на размер файла в 1 МБ для предотвращения сбоев браузера при загрузке больших файлов.
-
-### Изменено
-- Улучшена производительность за счет использования \`React.memo\` для ключевых компонентов, чтобы предотвратить ненужные перерисовки.
-- Улучшена подсветка синтаксиса кода за счет динамического определения языка по расширению файла (.gs, .html и т.д.).
 
 ## [1.2.0] - 2025-05-29
 ### Добавлено

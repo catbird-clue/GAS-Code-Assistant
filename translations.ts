@@ -1,21 +1,18 @@
 
+
 export const translations: Record<string, Record<string, string>> = {
   en: {
     // Header
     appTitle: "GAS Code Analyzer",
     help: "Show help",
-    resetSession: "Reset Session",
 
     // File Upload Sections
     libraryProjectTitle: "1. Main Project (Library)",
     libraryProjectDescription: "Upload the project files intended to be used as a library.",
     frontendProjectTitle: "2. Frontend Project",
     frontendProjectDescription: "Upload the project files that consume the library.",
-    clearFiles: "Clear Files",
     replaceLibraryWarning: "Replacing library files will reset the current analysis. Continue?",
     replaceFrontendWarning: "Replacing frontend files will reset the current analysis. Continue?",
-    clearLibraryWarning: "Are you sure you want to remove all library files and reset the analysis?",
-    clearFrontendWarning: "Are you sure you want to remove all frontend files and reset the analysis?",
     uploadAria: "Upload files",
     clickToUpload: "Click to upload",
     orDragAndDrop: "or drag and drop",
@@ -36,7 +33,6 @@ export const translations: Record<string, Record<string, string>> = {
     ask: "Ask",
     answering: "Answering...",
     testResetWarning: "This action will reset the current files and analysis. Continue?",
-    resetSessionWarning: "Are you sure you want to clear all files and analysis data? This action cannot be undone.",
     autoReanalyze: "Automatically re-run analysis after applying fixes",
     geminiModel: "Gemini Model:",
     flashModel: "Flash (fast)",
@@ -49,7 +45,6 @@ export const translations: Record<string, Record<string, string>> = {
     // Errors & Notifications
     errorTitle: "Error:",
     uploadFilesFirstError: "Please upload files first.",
-    fileTooLargeError: "File '{{fileName}}' is too large (max 1MB) and was not uploaded.",
     enterQuestionError: "Please enter your question.",
     analysisUnknownError: "An unknown error occurred during analysis.",
     questionUnknownError: "An unknown error occurred while processing the question.",
@@ -69,8 +64,7 @@ export const translations: Record<string, Record<string, string>> = {
     changesAppliedNotification: "Changes applied successfully.",
     fixesAppliedNotification: "{{count}} fixes applied.",
     undoNotification: "The last change was undone.",
-    sessionResetNotification: "Session has been reset.",
-
+    
     // Analysis Result Pane
     analysisInProgress: "Analyzing your code... This may take a few seconds.",
     startAnalysisPlaceholder: "Upload your project files to start the analysis.",
@@ -98,13 +92,6 @@ export const translations: Record<string, Record<string, string>> = {
     fixesSelected: "{{count}} fixes selected",
     applying: "Applying",
     applySelected: "Apply Selected",
-    severity: "Severity",
-    all: "All",
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    selectAll: "Select all",
-    deselectAll: "Deselect all",
     // markdown report
     reportTitle_md: "Code Analysis Report",
     overallSummary_md: "Overall Summary",
@@ -151,18 +138,14 @@ export const translations: Record<string, Record<string, string>> = {
     // Header
     appTitle: "GAS Code Analyzer",
     help: "Показать справку",
-    resetSession: "Сбросить сессию",
 
     // File Upload Sections
     libraryProjectTitle: "1. Основной проект (Библиотека)",
     libraryProjectDescription: "Загрузите файлы проекта, который используется как библиотека.",
     frontendProjectTitle: "2. Фронтенд-проект",
     frontendProjectDescription: "Загрузите файлы проекта, который использует библиотеку.",
-    clearFiles: "Очистить файлы",
     replaceLibraryWarning: "Замена файлов библиотеки приведет к сбросу текущего анализа. Продолжить?",
     replaceFrontendWarning: "Замена файлов фронтенда приведет к сбросу текущего анализа. Продолжить?",
-    clearLibraryWarning: "Вы уверены, что хотите удалить все файлы библиотеки и сбросить анализ?",
-    clearFrontendWarning: "Вы уверены, что хотите удалить все файлы фронтенда и сбросить анализ?",
     uploadAria: "Загрузить файлы",
     clickToUpload: "Нажмите для загрузки",
     orDragAndDrop: "или перетащите",
@@ -182,7 +165,6 @@ export const translations: Record<string, Record<string, string>> = {
     ask: "Вопрос",
     answering: "Отвечаю...",
     testResetWarning: "Это действие приведет к сбросу текущих файлов и анализа. Продолжить?",
-    resetSessionWarning: "Вы уверены, что хотите очистить все файлы и данные анализа? Это действие нельзя отменить.",
     autoReanalyze: "Автоматически запускать повторный анализ после применения исправлений",
     geminiModel: "Модель Gemini:",
     flashModel: "Flash (быстрая)",
@@ -195,7 +177,6 @@ export const translations: Record<string, Record<string, string>> = {
     // Errors & Notifications
     errorTitle: "Ошибка:",
     uploadFilesFirstError: "Пожалуйста, сначала загрузите файлы.",
-    fileTooLargeError: "Файл '{{fileName}}' слишком большой (макс. 1МБ) и не был загружен.",
     enterQuestionError: "Пожалуйста, введите ваш вопрос.",
     analysisUnknownError: "Произошла неизвестная ошибка при анализе.",
     questionUnknownError: "Произошла неизвестная ошибка при обработке вопроса.",
@@ -205,7 +186,7 @@ export const translations: Record<string, Record<string, string>> = {
     refactorError: "Произошла ошибка при рефакторинге: {{message}}",
     selfCorrectionAttempt: "Не удалось найти исходный код. Попытка №{{attempt}}: самокоррекция...",
     selfCorrectionError: "Ошибка во время самокоррекции: {{errorMsg}}",
-    maxAttemptsError: "Ошибка: Не удалось применить изменения после {{maxAttempts}} попыток. Модель не смогла найти правильный исходный код для замены в следующих файлах:{{failedSnippets}}",
+    maxAttemptsError: "Ошибка: Не удалось применить изменения после {{attempts}} попыток. Модель не смогла найти правильный исходный код для замены в следующих файлах:{{failedSnippets}}",
     changelogEntry: "В файле `{{fileName}}`: {{title}}.",
     changelogUpdateFailed: "Не удалось обновить CHANGELOG.",
     noFixesSelectedError: "Не выбрано ни одного исправления.",
@@ -215,7 +196,6 @@ export const translations: Record<string, Record<string, string>> = {
     changesAppliedNotification: "Изменения успешно применены.",
     fixesAppliedNotification: "{{count}} исправлений применено.",
     undoNotification: "Последнее изменение было отменено.",
-    sessionResetNotification: "Сессия сброшена.",
 
     // Analysis Result Pane
     analysisInProgress: "Идет анализ вашего кода... Это может занять несколько секунд.",
@@ -244,13 +224,6 @@ export const translations: Record<string, Record<string, string>> = {
     fixesSelected: "Выбрано исправлений: {{count}}",
     applying: "Применение",
     applySelected: "Применить выбранные",
-    severity: "Важность",
-    all: "Все",
-    low: "Низкая",
-    medium: "Средняя",
-    high: "Высокая",
-    selectAll: "Выбрать все",
-    deselectAll: "Снять выбор",
     // markdown report
     reportTitle_md: "Отчет по анализу кода",
     overallSummary_md: "Общий вывод",

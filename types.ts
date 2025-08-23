@@ -1,4 +1,5 @@
 
+
 export type ModelName = 'gemini-2.5-flash' | 'gemini-2.5-pro';
 
 export interface UploadedFile {
@@ -15,7 +16,6 @@ export interface SuggestedFix {
 
 export interface Recommendation {
   description: string;
-  severity: 'low' | 'medium' | 'high';
   originalCodeSnippet: string | null;
   suggestions: SuggestedFix[];
   appliedSuggestionIndex?: number;
