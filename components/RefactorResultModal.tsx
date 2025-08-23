@@ -1,5 +1,7 @@
 import React from 'react';
 import ReactDiffViewer from 'react-diff-viewer-continued';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { XIcon, DownloadIcon, AlertTriangleIcon } from './icons';
 import { RefactorResult } from '../types';
 
@@ -24,6 +26,16 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
   const handleDownloadMemo = () => {
     if (!result || !result.manualSteps || result.manualSteps.length === 0) return;
 
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const timestamp = `${year}-${month}-${day}_${hours}-${minutes}-${seconds}`;
+    const filename = `refactoring-memo-${timestamp}.txt`;
+
     let memoContent = "Памятка: Ручные действия после рефакторинга\n";
     memoContent += "===========================================\n\n";
     memoContent += "После применения автоматических исправлений кода, выполните следующие действия, чтобы обеспечить корректную работу приложения:\n\n";
@@ -42,7 +54,7 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'refactoring-memo.txt';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -97,7 +109,7 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
               <div className="mb-6">
                 <h3 className="text-xl font-bold mt-2 mb-3 text-indigo-300">Основное изменение</h3>
                 <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                  <p className="text-sm text-gray-400 mb-2">Файл: <span className="font-semibold text-gray-200">{result.mainChange.fileName}</span></p>
+                  <div className="text-sm text-gray-400 mb-2">Файл: <span className="font-semibold text-gray-200">{result.mainChange.fileName}</span></div>
                   <div className="text-sm rounded-lg overflow-hidden">
                      <ReactDiffViewer
                         oldValue={result.mainChange.originalCodeSnippet}
@@ -119,8 +131,8 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
                   <div className="space-y-4">
                     {result.relatedChanges.map((change, index) => (
                       <div key={index} className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
-                        <p className="text-sm text-gray-400 mb-2">Файл: <span className="font-semibold text-gray-200">{change.fileName}</span></p>
-                        <p className="text-gray-300 mb-3">{change.description}</p>
+                        <div className="text-sm text-gray-400 mb-2">Файл: <span className="font-semibold text-gray-200">{change.fileName}</span></div>
+                        <div className="text-gray-300 mb-3" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(change.description || '') as string) }} />
                          <div className="text-sm rounded-lg overflow-hidden">
                             <ReactDiffViewer
                                 oldValue={change.originalCodeSnippet}
@@ -137,7 +149,7 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
                     ))}
                   </div>
                 ) : (
-                  <p className="text-gray-400">Дополнительных изменений в других файлах не требуется.</p>
+                  <div className="text-gray-400">Дополнительных изменений в других файлах не требуется.</div>
                 )}
               </div>
               
@@ -149,9 +161,9 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
                   </h3>
                   <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-                      <p className="text-yellow-200 text-sm max-w-prose">
+                      <div className="text-yellow-200 text-sm max-w-prose">
                         После применения этих изменений кода вам необходимо будет выполнить следующие действия вручную, чтобы обеспечить полную работоспособность приложения.
-                      </p>
+                      </div>
                       <button 
                         onClick={handleDownloadMemo}
                         className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-md text-sm transition-colors flex-shrink-0"
@@ -163,9 +175,9 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
                     <ul className="space-y-3">
                       {result.manualSteps.map((step, index) => (
                         <li key={index} className="bg-gray-900/50 p-3 rounded-md border border-gray-700">
-                          <p className="font-semibold text-gray-200">{step.title}</p>
-                          {step.fileName && <p className="text-xs text-gray-500 mt-1">Файл: <code className="bg-gray-700 px-1 py-0.5 rounded">{step.fileName}</code></p>}
-                          <p className="text-sm text-gray-400 mt-1">{step.description}</p>
+                          <div className="font-semibold text-gray-200">{step.title}</div>
+                          {step.fileName && <div className="text-xs text-gray-500 mt-1">Файл: <code className="bg-gray-700 px-1 py-0.5 rounded">{step.fileName}</code></div>}
+                          <div className="text-sm text-gray-400 mt-1" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(step.description || '') as string) }} />
                         </li>
                       ))}
                     </ul>

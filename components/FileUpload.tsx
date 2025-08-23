@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { UploadedFile } from '../types';
 import { UploadIcon } from './icons';
 
@@ -8,6 +8,7 @@ interface FileUploadProps {
 
 const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
   const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileRead = (file: File): Promise<UploadedFile> => {
     return new Promise((resolve, reject) => {
@@ -28,7 +29,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
       onFilesUploaded(uploadedFiles);
     } catch (error) {
       console.error("Error reading files:", error);
-      // Handle error display to the user if needed
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   }, [onFilesUploaded]);
 
@@ -46,7 +50,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    e.stopPropagation(); // Necessary to allow drop
+    e.stopPropagation();
   };
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -66,29 +70,40 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
     }
   };
 
+  const handleClick = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
     <div
-      className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors duration-200 ${
+      className={`relative cursor-pointer border-2 border-dashed rounded-lg p-8 text-center transition-colors duration-200 block ${
         isDragging ? 'border-indigo-500 bg-indigo-900/20' : 'border-gray-600 hover:border-gray-500'
       }`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onClick={handleClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick() }}
+      role="button"
+      tabIndex={0}
+      aria-label="Upload files"
     >
       <input
+        ref={fileInputRef}
         type="file"
         multiple
-        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+        className="hidden"
         onChange={handleFileChange}
         accept=".gs,.js,.html,.json,.md"
+        tabIndex={-1}
       />
-      <div className="flex flex-col items-center justify-center space-y-2 text-gray-400">
+      <div className="flex flex-col items-center justify-center space-y-2 text-gray-400 pointer-events-none">
         <UploadIcon />
-        <p className="text-gray-300">
+        <div className="text-gray-300">
           <span className="font-semibold text-indigo-400">Нажмите для загрузки</span> или перетащите
-        </p>
-        <p className="text-xs">Поддерживаются .gs, .js, .html, .json, .md</p>
+        </div>
+        <div className="text-xs">Поддерживаются .gs, .js, .html, .json, .md</div>
       </div>
     </div>
   );

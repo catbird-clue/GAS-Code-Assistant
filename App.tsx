@@ -1,11 +1,13 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult } from './types';
 import FileUpload from './components/FileUpload';
 import AnalysisResult from './components/AnalysisResult';
+import ChatView from './components/ChatView';
 import { analyzeGasProject, refactorCode, updateChangelog, askQuestionAboutCode, batchRefactorCode } from './services/geminiService';
-import { GithubIcon, FileCodeIcon, WandIcon, DownloadIcon, XIcon } from './components/icons';
+import { GithubIcon, FileCodeIcon, WandIcon, DownloadIcon, XIcon, BeakerIcon, HelpIcon } from './components/icons';
 import RefactorResultModal from './components/RefactorResultModal';
 import { Chat } from '@google/genai';
+import HelpModal from './components/HelpModal';
 
 interface Patch {
   index: number;
@@ -20,6 +22,24 @@ interface UndoState {
 }
 
 const MAX_UNDO_STACK_SIZE = 10;
+
+const getInitialUndoStack = (): UndoState[] => {
+  try {
+    const storedStack = localStorage.getItem('undoStack');
+    if (storedStack) {
+      const parsedStack = JSON.parse(storedStack);
+      if (Array.isArray(parsedStack)) {
+        return parsedStack;
+      }
+    }
+  } catch (e) {
+    console.error("Failed to load undo history:", e);
+    // If parsing fails, clear the corrupted item
+    localStorage.removeItem('undoStack');
+  }
+  return [];
+};
+
 
 export default function App(): React.ReactNode {
   const [libraryFiles, setLibraryFiles] = useState<UploadedFile[]>([]);
@@ -40,26 +60,16 @@ export default function App(): React.ReactNode {
   const [userQuestion, setUserQuestion] = useState<string>('');
   const [conversationHistory, setConversationHistory] = useState<ConversationTurn[]>([]);
   const [isAnswering, setIsAnswering] = useState<boolean>(false);
-  const [chatSession, setChatSession] = useState<Chat | null>(null);
+  const chatSessionRef = useRef<Chat | null>(null);
 
   const [autoReanalyze, setAutoReanalyze] = useState(false);
-  const [undoStack, setUndoStack] = useState<UndoState[]>([]);
+  const [undoStack, setUndoStack] = useState<UndoState[]>(getInitialUndoStack);
   
   const [selectedFixes, setSelectedFixes] = useState<Record<string, {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}>>({});
   const [changelogLang, setChangelogLang] = useState('ru');
-
-
-  useEffect(() => {
-    try {
-      const storedStack = localStorage.getItem('undoStack');
-      if (storedStack) {
-        setUndoStack(JSON.parse(storedStack));
-      }
-    } catch (e) {
-      console.error("Failed to load undo history:", e);
-      localStorage.removeItem('undoStack');
-    }
-  }, []);
+  const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
+  const [isTestRunPending, setIsTestRunPending] = useState(false);
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
 
   const updateUndoStack = (newStack: UndoState[]) => {
     setUndoStack(newStack);
@@ -78,57 +88,59 @@ export default function App(): React.ReactNode {
     updateUndoStack(newStack);
   };
   
-
-  const clearResults = () => {
+  const clearAnalysisAndChat = () => {
     setAnalysisResult(null);
     setConversationHistory([]);
-    setChatSession(null);
+    chatSessionRef.current = null;
     setAnalysisStats(null);
     setError(null);
+    setNotification(null);
     updateUndoStack([]);
-  };
-
-  const confirmFileChange = () => {
-    if (analysisResult || conversationHistory.length > 0) {
-      return window.confirm("Изменение состава файлов приведет к сбросу текущего результата анализа и истории диалога. Продолжить?");
-    }
-    return true;
+    setSelectedFixes({});
   };
 
   const handleLibraryFilesUploaded = (uploadedFiles: UploadedFile[]) => {
-    if (!confirmFileChange()) return;
+    if (libraryFiles.length > 0 && analysisResult) {
+       if (!window.confirm("Замена файлов библиотеки приведет к сбросу текущего анализа. Продолжить?")) {
+        return;
+      }
+    }
     setLibraryFiles(uploadedFiles);
-    clearResults();
+    if(analysisResult) clearAnalysisAndChat();
   };
   
   const handleFrontendFilesUploaded = (uploadedFiles: UploadedFile[]) => {
-    if (!confirmFileChange()) return;
+     if (frontendFiles.length > 0 && analysisResult) {
+       if (!window.confirm("Замена файлов фронтенда приведет к сбросу текущего анализа. Продолжить?")) {
+        return;
+      }
+    }
     setFrontendFiles(uploadedFiles);
-    clearResults();
+    if(analysisResult) clearAnalysisAndChat();
   };
 
   const handleClearLibraryFiles = () => {
-    if (!confirmFileChange()) return;
-    setLibraryFiles([]);
-    clearResults();
+    if (window.confirm("Вы уверены, что хотите удалить все файлы библиотеки и сбросить анализ?")) {
+        setLibraryFiles([]);
+        clearAnalysisAndChat();
+    }
   }
   
   const handleClearFrontendFiles = () => {
-    if (!confirmFileChange()) return;
-    setFrontendFiles([]);
-    clearResults();
+    if (window.confirm("Вы уверены, что хотите удалить все файлы фронтенда и сбросить анализ?")) {
+        setFrontendFiles([]);
+        clearAnalysisAndChat();
+    }
   }
 
   const handleRemoveLibraryFile = (indexToRemove: number) => {
-    if (!confirmFileChange()) return;
     setLibraryFiles(prev => prev.filter((_, index) => index !== indexToRemove));
-    clearResults();
+    if(analysisResult) clearAnalysisAndChat();
   };
   
   const handleRemoveFrontendFile = (indexToRemove: number) => {
-    if (!confirmFileChange()) return;
     setFrontendFiles(prev => prev.filter((_, index) => index !== indexToRemove));
-    clearResults();
+    if(analysisResult) clearAnalysisAndChat();
   };
 
   const handleAnalyze = useCallback(async () => {
@@ -143,7 +155,8 @@ export default function App(): React.ReactNode {
     setNotification(null);
     setAnalysisStats(null);
     setConversationHistory([]);
-    setChatSession(null);
+    chatSessionRef.current = null;
+    setActiveTab('analysis');
     updateUndoStack([]);
 
     const startTime = new Date();
@@ -185,24 +198,19 @@ export default function App(): React.ReactNode {
     
     setIsAnswering(true);
     setError(null);
-    setAnalysisResult(null); 
     setNotification(null);
-    setAnalysisStats(null);
-    updateUndoStack([]);
-
-    if (!chatSession) {
-        setConversationHistory([]);
-    }
+    setActiveTab('chat');
 
     try {
       const { answer, chatSession: newChatSession } = await askQuestionAboutCode({ 
         libraryFiles, 
         frontendFiles,
         question: userQuestion,
-        chatSession: chatSession,
+        chatSession: chatSessionRef.current,
+        analysis: analysisResult,
       });
       setConversationHistory(prev => [...prev, { question: userQuestion, answer }]);
-      setChatSession(newChatSession);
+      chatSessionRef.current = newChatSession;
       setUserQuestion('');
     } catch (e) {
       console.error(e);
@@ -210,7 +218,7 @@ export default function App(): React.ReactNode {
     } finally {
       setIsAnswering(false);
     }
-  }, [libraryFiles, frontendFiles, userQuestion, chatSession]);
+  }, [libraryFiles, frontendFiles, userQuestion, analysisResult]);
 
 
   const handleApplyFix = useCallback(async ({ fileName, recommendation, recIndex, suggestionIndex }: { fileName: string; recommendation: Recommendation, recIndex: number, suggestionIndex: number }) => {
@@ -247,9 +255,9 @@ export default function App(): React.ReactNode {
     }
   }, [libraryFiles, frontendFiles]);
 
-  const applyChangesToFiles = (allChanges: RefactorChange[]) => {
-    const newLibraryFiles = JSON.parse(JSON.stringify(libraryFiles));
-    const newFrontendFiles = JSON.parse(JSON.stringify(frontendFiles));
+  const applyChangesToFiles = (allChanges: RefactorChange[], currentLibraryFiles: UploadedFile[], currentFrontendFiles: UploadedFile[]) => {
+    const newLibraryFiles: UploadedFile[] = JSON.parse(JSON.stringify(currentLibraryFiles));
+    const newFrontendFiles: UploadedFile[] = JSON.parse(JSON.stringify(currentFrontendFiles));
     
     const changesByFile = new Map<string, RefactorChange[]>();
     allChanges.forEach(change => {
@@ -294,10 +302,11 @@ export default function App(): React.ReactNode {
             const nextPatch = patches[i+1];
             const currentEnd = currentPatch.index + currentPatch.originalLength;
             if (currentEnd > nextPatch.index) {
-                patches.splice(i + 1, 1); 
-                i = -1; 
+                console.warn("Overlapping patch detected. Discarding the latter patch.");
+                patches.splice(i + 1, 1);
+            } else {
+                i++;
             }
-            i++;
         }
 
         patches.sort((a, b) => b.index - a.index);
@@ -313,25 +322,13 @@ export default function App(): React.ReactNode {
 
         fileToUpdate.content = currentContent;
     }
-
-    if (totalAppliedCount === 0 && allChanges.length > 0) {
-        setError("Ошибка: Ни одно из предложенных изменений не удалось применить. Оригинальный код для замены не был найден в файлах.");
-        return { success: false };
-    }
     
-    if (failedFiles.size > 0) {
-        setError(`Ошибка: Часть изменений не удалось применить в файлах: ${Array.from(failedFiles).join(', ')}.`);
-    }
-
     const changedFileNames = new Set(allChanges.map(c => c.fileName).filter(name => !failedFiles.has(name)));
     
     newLibraryFiles.forEach(file => { if (changedFileNames.has(file.name)) file.changesCount = (file.changesCount || 0) + 1; });
     newFrontendFiles.forEach(file => { if (changedFileNames.has(file.name)) file.changesCount = (file.changesCount || 0) + 1; });
     
-    setLibraryFiles(newLibraryFiles);
-    setFrontendFiles(newFrontendFiles);
-
-    return { success: true, newLibraryFiles, newFrontendFiles, failedFiles };
+    return { success: totalAppliedCount > 0 || allChanges.length === 0, newLibraryFiles, newFrontendFiles, failedFiles };
   };
 
   const handleConfirmRefactor = async (result: RefactorResult) => {
@@ -368,10 +365,12 @@ export default function App(): React.ReactNode {
     };
 
     const allChanges = [mainChange, ...result.relatedChanges];
-    const { success, newLibraryFiles, newFrontendFiles, failedFiles } = applyChangesToFiles(allChanges);
+    const { success, newLibraryFiles, newFrontendFiles, failedFiles } = applyChangesToFiles(allChanges, libraryFiles, frontendFiles);
     
     if (!success) {
-        updateUndoStack(undoStack.slice(0, -1)); // Revert undo push
+        updateUndoStack(undoStack.slice(0, -1));
+        const errorMsg = `Ошибка: Ни одно из предложенных изменений не удалось применить. Оригинальный код для замены не был найден в файлах: ${Array.from(failedFiles).join(', ')}`;
+        setError(errorMsg);
         setIsApplyingChanges(false);
         return;
     }
@@ -382,13 +381,16 @@ export default function App(): React.ReactNode {
             try {
                 const changeDescription = `В файле \`${refactoringRecommendation.fileName}\`: ${fileAnalysis.recommendations[refactoringRecommendation.recIndex].suggestions[refactoringRecommendation.suggestionIndex].title}.`;
                 changelogFile.content = await updateChangelog({ currentChangelog: changelogFile.content, changeDescription, language: changelogLang });
+                changelogFile.changesCount = (changelogFile.changesCount || 0) + 1;
             } catch (e) {
                 console.error("Failed to update changelog:", e);
-                const currentError = error || "";
-                setError(`${currentError}\nНе удалось обновить CHANGELOG.`);
+                setError((prevError) => `${prevError || ''}\nНе удалось обновить CHANGELOG.`);
             }
         }
     }
+    
+    setLibraryFiles(newLibraryFiles);
+    setFrontendFiles(newFrontendFiles);
     
     const newAnalysisResult = JSON.parse(JSON.stringify(analysisResult));
     const fileInAnalysis = newAnalysisResult.libraryProject.find((f: FileAnalysis) => f.fileName === refactoringRecommendation.fileName) 
@@ -397,9 +399,9 @@ export default function App(): React.ReactNode {
         fileInAnalysis.recommendations[refactoringRecommendation.recIndex].appliedSuggestionIndex = refactoringRecommendation.suggestionIndex;
     }
     setAnalysisResult(newAnalysisResult);
-    setConversationHistory([]);
-
+    
     setNotification(`Изменения применены. Анализ может быть неактуальным.`);
+    chatSessionRef.current = null;
     setIsApplyingChanges(false);
     setIsRefactorModalOpen(false);
     setCurrentRefactor(null);
@@ -426,13 +428,14 @@ export default function App(): React.ReactNode {
     setIsApplyingChanges(true);
     setError(null);
     setNotification(null);
-    if (Object.keys(selectedFixes).length === 0) {
+    const fixesToApply = Object.values(selectedFixes);
+    if (fixesToApply.length === 0) {
         setError("Не выбрано ни одного исправления.");
         setIsApplyingChanges(false);
         return;
     }
 
-    const instructions = Object.values(selectedFixes).map(fix => ({
+    const instructions = fixesToApply.map(fix => ({
       fileName: fix.fileName,
       code: fix.rec.originalCodeSnippet,
       instruction: `${fix.rec.description}\n\nКонкретное предложение: ${fix.rec.suggestions[fix.suggestionIndex].title} - ${fix.rec.suggestions[fix.suggestionIndex].description}`
@@ -451,16 +454,41 @@ export default function App(): React.ReactNode {
         analysisResult: JSON.parse(JSON.stringify(analysisResult))
       });
 
-      const { success } = applyChangesToFiles(result.changes);
+      const { success, newLibraryFiles: tempNewLibraryFiles, newFrontendFiles: tempNewFrontendFiles, failedFiles } = applyChangesToFiles(result.changes, libraryFiles, frontendFiles);
 
       if (!success) {
-          updateUndoStack(undoStack.slice(0, -1)); // Revert undo push
+          updateUndoStack(undoStack.slice(0, -1));
+          const errorMsg = `Ошибка: Ни одно из предложенных изменений не удалось применить. Оригинальный код для замены не был найден в файлах: ${Array.from(failedFiles).join(', ')}`;
+          setError(errorMsg);
           setIsApplyingChanges(false);
           return;
       }
       
+      const changelogFile = tempNewLibraryFiles.find(f => f.name.toLowerCase() === 'changelog.md') || tempNewFrontendFiles.find(f => f.name.toLowerCase() === 'changelog.md');
+      if (changelogFile) {
+        let currentChangelogContent = changelogFile.content;
+        let changesApplied = 0;
+        for (const fix of fixesToApply) {
+          try {
+            const changeDescription = `В файле \`${fix.fileName}\`: ${fix.rec.suggestions[fix.suggestionIndex].title}.`;
+            currentChangelogContent = await updateChangelog({ currentChangelog: currentChangelogContent, changeDescription, language: changelogLang });
+            changesApplied++;
+          } catch(e) {
+            console.error("Failed to update changelog for a fix:", e);
+            setError((prevError) => `${prevError || ''}\nНе удалось обновить CHANGELOG для исправления в ${fix.fileName}.`);
+          }
+        }
+        changelogFile.content = currentChangelogContent;
+        if (changesApplied > 0) {
+          changelogFile.changesCount = (changelogFile.changesCount || 0) + changesApplied;
+        }
+      }
+      
+      setLibraryFiles(tempNewLibraryFiles);
+      setFrontendFiles(tempNewFrontendFiles);
+      
       const newAnalysisResult = JSON.parse(JSON.stringify(analysisResult));
-      Object.values(selectedFixes).forEach(fix => {
+      fixesToApply.forEach(fix => {
           const fileInAnalysis = newAnalysisResult.libraryProject.find((f: FileAnalysis) => f.fileName === fix.fileName) 
                             || newAnalysisResult.frontendProject.find((f: FileAnalysis) => f.fileName === fix.fileName);
           if (fileInAnalysis) {
@@ -468,8 +496,9 @@ export default function App(): React.ReactNode {
           }
       });
       setAnalysisResult(newAnalysisResult);
+      chatSessionRef.current = null;
       setSelectedFixes({});
-      setNotification(`${Object.keys(selectedFixes).length} исправлений применено.`);
+      setNotification(`${fixesToApply.length} исправлений применено.`);
 
     } catch(e) {
       console.error(e);
@@ -490,8 +519,13 @@ export default function App(): React.ReactNode {
             setAnalysisResult(lastState.analysisResult);
             updateUndoStack(newStack);
             setNotification("Последнее изменение было отменено.");
+            chatSessionRef.current = null; // Reset chat context
         }
     }
+  };
+  
+  const handleDismissNotification = () => {
+    setNotification(null);
   };
 
   const handleDownloadFile = (file: UploadedFile) => {
@@ -505,6 +539,73 @@ export default function App(): React.ReactNode {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
+  
+  const handleTest = () => {
+    if ((libraryFiles.length > 0 || frontendFiles.length > 0) && !window.confirm("Это действие приведет к сбросу текущих файлов и анализа. Продолжить?")) {
+      return;
+    }
+
+    const testLibraryFiles: UploadedFile[] = [{
+        name: 'Code.gs',
+        content: `/**
+ * @OnlyCurrentDoc
+ */
+
+/**
+ * A library function to process data from a sheet.
+ * This function has a performance issue.
+ * @param {string} sheetName The name of the sheet to process.
+ * @return {number} The sum of values in column A.
+ */
+function processDataFromSheet(sheetName) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  const lastRow = sheet.getLastRow();
+  let sum = 0;
+  
+  // Inefficient loop: calls getValue() repeatedly
+  for (let i = 1; i <= lastRow; i++) {
+    sum += sheet.getRange("A" + i).getValue();
+  }
+  
+  return sum;
+}`
+    }, {
+      name: 'CHANGELOG.md',
+      content: `# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+`
+    }];
+
+    const testFrontendFiles: UploadedFile[] = [{
+        name: 'Main.gs',
+        content: `/**
+ * Main function to call the library.
+ * This function must use the library with the default identifier "MyLibrary".
+ */
+function main() {
+  const result = MyLibrary.processDataFromSheet("Sales Data");
+  Logger.log("The result is: " + result);
+}`
+    }];
+    
+    clearAnalysisAndChat();
+    setLibraryFiles(testLibraryFiles);
+    setFrontendFiles(testFrontendFiles);
+    setIsTestRunPending(true);
+  };
+  
+  useEffect(() => {
+      if (isTestRunPending && (libraryFiles.length > 0 || frontendFiles.length > 0)) {
+          handleAnalyze();
+          setIsTestRunPending(false);
+      }
+  }, [isTestRunPending, libraryFiles, frontendFiles, handleAnalyze]);
 
   const hasCodeFiles = libraryFiles.length > 0 || frontendFiles.length > 0;
 
@@ -515,9 +616,14 @@ export default function App(): React.ReactNode {
           <WandIcon />
           <span>GAS Code Analyzer</span>
         </h1>
-        <a href="https://github.com/google/generative-ai-docs" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white transition-colors">
-          <GithubIcon />
-        </a>
+        <div className="flex items-center gap-4">
+          <button onClick={() => setIsHelpModalOpen(true)} className="text-gray-400 hover:text-white transition-colors" aria-label="Показать справку">
+            <HelpIcon />
+          </button>
+          <a href="https://github.com/google/generative-ai-docs" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white transition-colors">
+            <GithubIcon />
+          </a>
+        </div>
       </header>
       
       <main className="flex-grow container mx-auto p-4 md:p-8 flex flex-col lg:flex-row gap-8">
@@ -533,9 +639,9 @@ export default function App(): React.ReactNode {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-gray-400 mt-1">
+              <div className="text-sm text-gray-400 mt-1">
                 Загрузите файлы проекта, который используется как библиотека.
-              </p>
+              </div>
             </div>
             {libraryFiles.length === 0 ? (
               <FileUpload onFilesUploaded={handleLibraryFilesUploaded} />
@@ -584,9 +690,9 @@ export default function App(): React.ReactNode {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-gray-400 mt-1">
+              <div className="text-sm text-gray-400 mt-1">
                 Загрузите файлы проекта, который использует библиотеку.
-              </p>
+              </div>
             </div>
              {frontendFiles.length === 0 ? (
               <FileUpload onFilesUploaded={handleFrontendFilesUploaded} />
@@ -636,7 +742,7 @@ export default function App(): React.ReactNode {
                       rows={3}
                       aria-label="Поле для вопроса по коду"
                   />
-                  <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <button
                         onClick={handleAnalyze}
                         disabled={isAnalyzing || isAnswering || !hasCodeFiles}
@@ -651,8 +757,16 @@ export default function App(): React.ReactNode {
                             Анализ...
                           </>
                         ) : (
-                           analysisResult ? "Повторить анализ" : "Проанализировать код"
+                           analysisResult ? "Повторить" : "Анализ"
                         )}
+                      </button>
+                       <button
+                        onClick={handleTest}
+                        disabled={isAnalyzing || isAnswering}
+                        className="w-full flex items-center justify-center gap-2 bg-teal-600 text-white font-semibold px-4 py-3 rounded-md transition-all hover:bg-teal-500 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:text-gray-400"
+                      >
+                        <BeakerIcon />
+                        Тест
                       </button>
                       <button
                         onClick={handleAskQuestion}
@@ -668,7 +782,7 @@ export default function App(): React.ReactNode {
                             Отвечаю...
                           </>
                         ) : (
-                          "Задать вопрос"
+                          "Вопрос"
                         )}
                       </button>
                   </div>
@@ -707,22 +821,50 @@ export default function App(): React.ReactNode {
                 <strong>Ошибка:</strong> {error}
               </div>
             )}
-            <AnalysisResult 
-              analysis={analysisResult} 
-              isLoading={isAnalyzing} 
-              hasFiles={hasCodeFiles}
-              onApplyFix={handleApplyFix}
-              notification={notification}
-              analysisStats={analysisStats}
-              conversationHistory={conversationHistory}
-              isAnswering={isAnswering}
-              onUndo={handleUndo}
-              canUndo={undoStack.length > 0}
-              selectedFixes={selectedFixes}
-              onToggleFixSelection={handleToggleFixSelection}
-              onApplySelectedFixes={handleApplySelectedFixes}
-              isApplyingChanges={isApplyingChanges}
-            />
+             <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+                <div className="flex items-center gap-2" role="tablist" aria-label="Результаты">
+                    <button
+                    onClick={() => setActiveTab('analysis')}
+                    role="tab"
+                    aria-selected={activeTab === 'analysis'}
+                    className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${activeTab === 'analysis' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50 hover:text-white'}`}
+                    >
+                    Анализ
+                    </button>
+                    <button
+                    onClick={() => setActiveTab('chat')}
+                    role="tab"
+                    aria-selected={activeTab === 'chat'}
+                    className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${activeTab === 'chat' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50 hover:text-white'}`}
+                    >
+                    Чат
+                    </button>
+                </div>
+            </div>
+             <div className="flex-grow overflow-y-auto">
+                {activeTab === 'analysis' ? (
+                    <AnalysisResult 
+                        analysis={analysisResult} 
+                        isLoading={isAnalyzing} 
+                        hasFiles={hasCodeFiles}
+                        onApplyFix={handleApplyFix}
+                        notification={notification}
+                        onDismissNotification={handleDismissNotification}
+                        analysisStats={analysisStats}
+                        onUndo={handleUndo}
+                        canUndo={undoStack.length > 0}
+                        selectedFixes={selectedFixes}
+                        onToggleFixSelection={handleToggleFixSelection}
+                        onApplySelectedFixes={handleApplySelectedFixes}
+                        isApplyingChanges={isApplyingChanges}
+                    />
+                ) : (
+                    <ChatView
+                        conversationHistory={conversationHistory}
+                        isAnswering={isAnswering}
+                    />
+                )}
+            </div>
           </div>
         </div>
       </main>
@@ -733,6 +875,10 @@ export default function App(): React.ReactNode {
         isLoading={isRefactoring}
         isApplyingChanges={isApplyingChanges}
         onConfirm={handleConfirmRefactor}
+      />
+      <HelpModal 
+        isOpen={isHelpModalOpen}
+        onClose={() => setIsHelpModalOpen(false)}
       />
     </div>
   );

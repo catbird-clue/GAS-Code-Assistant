@@ -59,6 +59,7 @@ export interface AnalysisStats {
 export interface ConversationTurn {
   question: string;
   answer: string;
+  analysis?: Analysis | null;
 }
 
 export interface BatchInstruction {

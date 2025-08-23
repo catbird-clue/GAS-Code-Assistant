@@ -1,6 +1,5 @@
-
 import { GoogleGenAI, Type, Chat } from "@google/genai";
-import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult } from '../types';
+import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation } from '../types';
 
 const API_KEY = process.env.API_KEY;
 
@@ -121,7 +120,7 @@ Analyze them with this relationship in mind.
 **Instructions:**
 1.  **Analyze Holistically:** Review all files to understand the project's overall purpose and architecture.
 2.  **File-by-File Analysis:** For each file in both the library and frontend projects, provide a list of actionable recommendations.
-3.  **Provide Actionable Suggestions:** For each recommendation involving code changes, you MUST extract the *original code snippet* from the user's file that needs to be fixed. Then, provide one or more concrete \`suggestions\` in an array. The original code snippet must be an exact match, including whitespace.
+3.  **Provide Actionable Suggestions:** For each recommendation involving code changes, you MUST extract the *original code snippet* from the user's file. The original code snippet must be a complete, self-contained block of code (e.g., a full for-loop including its body and closing brace, a full function definition). It must also be an exact, character-for-character match from the user's file, including all original indentation and whitespace. After extracting the snippet, provide one or more concrete \`suggestions\` in an array.
 4.  **Handle Multiple Solutions:** If a problem has multiple valid solutions (e.g., 'do A or do B'), list each one as a separate suggestion object in the \`suggestions\` array. Each suggestion must have a clear \`title\`, a \`description\` of the approach, and the corresponding \`correctedCodeSnippet\`. If there is only one solution, the \`suggestions\` array should still contain one object.
 5.  **Handle General Advice:** If a recommendation is general and doesn't apply to a specific block of code, the \`originalCodeSnippet\` field should be null, and the \`suggestions\` array should be empty.
 6.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
@@ -184,19 +183,52 @@ interface AskQuestionParams {
   libraryFiles: UploadedFile[];
   frontendFiles: UploadedFile[];
   question: string;
-  chatSession?: Chat;
+  chatSession?: Chat | null;
+  analysis?: Analysis | null;
 }
 
-function buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question }: Omit<AskQuestionParams, 'chatSession'>): string {
+function buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis }: Omit<AskQuestionParams, 'chatSession'>): string {
   const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
   const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
 
-  return `
-You are an expert Google Apps Script (GAS) developer and code assistant.
-This is the beginning of a conversation. I am providing you with the full context of a project. Please analyze it and then answer my first question. For all subsequent messages in this chat, remember this initial code context.
-You MUST respond exclusively in Russian. Format your responses using Markdown for readability.
+  let analysisContext = '';
 
-**Here are the project files:**
+  if (analysis) {
+      const appliedFixes = [...analysis.libraryProject, ...analysis.frontendProject]
+        .flatMap(file => (file.recommendations || []).map(rec => ({ ...rec, fileName: file.fileName })))
+        .filter(rec => rec.appliedSuggestionIndex !== undefined);
+
+      if (appliedFixes.length > 0) {
+          const fixesList = appliedFixes.map(rec => 
+              `- В файле \`${rec.fileName}\`: "${rec.suggestions[rec.appliedSuggestionIndex!].title}"`
+          ).join('\n');
+
+          analysisContext = `
+**КРИТИЧЕСКИ ВАЖНЫЙ КОНТЕКСТ:**
+Ты ранее провел анализ этого проекта. С тех пор пользователь **применил следующие исправления**:\n${fixesList}
+Код, который предоставлен ниже, является **АКТУАЛЬНОЙ ВЕРСИЕЙ**. Твой предыдущий анализ теперь частично устарел.
+Твоя задача — отвечать на вопросы, основываясь ИСКЛЮЧИТЕЛЬНО на **ТЕКУЩЕМ СОСТОЯНИИ КОДА**. Не ссылайся на рекомендации из старого анализа, которые уже были применены.
+`;
+      } else {
+        analysisContext = `
+**КОНТЕКСТ:**
+Ты уже провел анализ этого проекта. Вот его результаты. Используй их как основной контекст для ответов.
+<analysis_results>
+${JSON.stringify({ overallSummary: analysis.overallSummary, libraryProject: analysis.libraryProject, frontendProject: analysis.frontendProject }, null, 2)}
+</analysis_results>
+`;
+      }
+  } else {
+    analysisContext = `Это начало нашего разговора. Я предоставляю тебе полный код проекта. Пожалуйста, проанализируй его и ответь на мой первый вопрос.`;
+  }
+
+  return `
+You are an expert Google Apps Script (GAS) developer and a helpful code assistant. Your memory of the project state is updated with each question.
+${analysisContext}
+You MUST respond exclusively in Russian. Format your responses using Markdown for readability.
+**Отвечай лаконично и по существу, если пользователь не просит предоставить больше деталей.**
+
+**Вот файлы проекта (это их АКТУАЛЬНОЕ состояние):**
 
 ${librarySection}
 
@@ -204,20 +236,21 @@ ${frontendSection}
 
 ---
 
-**My first question is:**
+**Мой вопрос:**
 "${question}"
 `;
 }
 
 
-export async function askQuestionAboutCode({ libraryFiles, frontendFiles, question, chatSession }: AskQuestionParams): Promise<{ answer: string; chatSession: Chat }> {
+
+export async function askQuestionAboutCode({ libraryFiles, frontendFiles, question, chatSession, analysis }: AskQuestionParams): Promise<{ answer: string; chatSession: Chat }> {
   try {
     if (chatSession) {
       const response = await chatSession.sendMessage({ message: question });
       return { answer: response.text.trim(), chatSession };
     } else {
       const chat = ai.chats.create({ model });
-      const initialPrompt = buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question });
+      const initialPrompt = buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis });
       const response = await chat.sendMessage({ message: initialPrompt });
       return { answer: response.text.trim(), chatSession: chat };
     }
@@ -318,7 +351,7 @@ ${frontendSection}
 **Your Task & JSON Output:**
 1.  **Refactor the Main Snippet:** Create the corrected version of the code snippet. This is the 'mainChange'.
 2.  **Analyze Project-Wide Impact:** Based on the full context, identify ALL other files and code snippets that need to be updated as a direct consequence of the main change. These are the 'relatedChanges'.
-3.  **Provide Snippets for All Changes:** For every main and related change, you MUST provide the \`originalCodeSnippet\` to be replaced and the new, \`correctedCodeSnippet\`. The \`originalCodeSnippet\` MUST be an *exact, verbatim, character-for-character match* of the code from the source file, including all whitespace, indentation, and comments. This is critical for the replacement logic to work.
+3.  **Provide Snippets for All Changes:** For every main and related change, you MUST provide the \`originalCodeSnippet\` to be replaced and the new, \`correctedCodeSnippet\`. The \`originalCodeSnippet\` MUST be a complete, self-contained block of code and an *exact, verbatim, character-for-character match* of the code from the source file, including all whitespace, indentation, and comments. This is critical for the replacement logic to work.
 4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
 5.  **Identify Manual Follow-up Actions:** Critically, determine if the automated code change requires the user to perform any manual actions *outside* of the code editor to make the application functional. Examples include:
     *   Setting a Script Property in the GAS project settings.
@@ -382,7 +415,7 @@ ${instructionsText}
 
 **Your Task & JSON Output:**
 1.  **Consolidate All Changes:** Analyze all tasks and their project-wide impact. Generate a single, flat list of all unique code changes required. Each change object in the 'changes' array must contain the file name, a description, the exact original code snippet, and the corrected code snippet.
-2.  **Ensure Exact Snippets:** The \`originalCodeSnippet\` for each change MUST be an exact, verbatim match from the source files. This is critical.
+2.  **Ensure Exact Snippets:** The \`originalCodeSnippet\` for each change MUST be a complete, self-contained block of code and an exact, verbatim match from the source files. This is critical.
 3.  **Consolidate Manual Steps:** Review all changes and create a consolidated, de-duplicated list of any manual follow-up actions required.
 4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
 `;
