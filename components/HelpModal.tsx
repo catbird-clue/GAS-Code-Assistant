@@ -38,6 +38,14 @@ This tool is an intelligent assistant designed to analyze, refactor, and improve
 
 # Changelog
 
+## [1.4.0] - 2025-05-31
+### Fixed
+- **Improved API error handling.** The analyzer now detects incomplete responses caused by API key rate limits (e.g., when using a free tier key) and displays a clear error message to the user, advising them to check their quotas. This prevents silent failures where users would receive a truncated analysis.
+
+## [1.3.0] - 2025-05-30
+### Changed
+- **Solidified automatic CHANGELOG.md updates.** The system is now explicitly designed to automatically update a \`CHANGELOG.md\` file when fixes are applied. The AI assistant's instructions have been reinforced to correctly communicate this feature and prevent contradictory responses.
+
 ## [1.2.0] - 2025-05-29
 ### Added
 - Implemented a language switcher (EN/RU) for the entire UI.
@@ -85,6 +93,14 @@ const helpContentRu = `
 ---
 
 # Журнал изменений
+
+## [1.4.0] - 2025-05-31
+### Исправлено
+- **Улучшена обработка ошибок API.** Анализатор теперь обнаруживает неполные ответы, вызванные лимитами API-ключа (например, при использовании бесплатного ключа), и выводит пользователю четкое сообщение об ошибке с советом проверить свои квоты. Это предотвращает "тихие" сбои, когда пользователи получали урезанный результат анализа.
+
+## [1.3.0] - 2025-05-30
+### Изменено
+- **Закреплена функция автоматического обновления CHANGELOG.md.** Система теперь явным образом настроена на автоматическое обновление файла \`CHANGELOG.md\` при применении исправлений. Инструкции для ИИ-ассистента были усилены, чтобы он корректно сообщал об этой функции и не давал противоречивых ответов.
 
 ## [1.2.0] - 2025-05-29
 ### Добавлено

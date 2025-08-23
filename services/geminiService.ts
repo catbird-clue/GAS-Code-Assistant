@@ -202,8 +202,9 @@ Analyze them with this relationship in mind.
     - **CRITICAL:** The \`originalCodeSnippet\` **MUST NOT** contain any of your suggested changes or new code. It is only for identifying the code to be replaced.
 4.  **Handle Multiple Solutions:** If a problem has multiple valid solutions (e.g., 'do A or do B'), list each one as a separate suggestion object in the \`suggestions\` array. Each suggestion must have a clear \`title\`, a \`description\` of the approach, and the corresponding \`correctedCodeSnippet\`. If there is only one solution, the \`suggestions\` array should still contain one object.
 5.  **Handle General Advice:** If a recommendation is general and doesn't apply to a specific block of code, the \`originalCodeSnippet\` field should be null, and the \`suggestions\` array should be empty.
-6.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
-7.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
+6.  **W3C Standards for HTML:** ${isRussian ? "Для HTML-файлов (`.html`) уделите особое внимание соответствию стандартам W3C (например, правильная вложенность тегов, валидные атрибуты, доступность). Учитывайте, что Google Apps Script может добавлять свой код, но код, написанный пользователем, должен соответствовать стандартам." : "For any HTML files (`.html`), pay special attention to compliance with W3C standards (e.g., proper tag nesting, valid attributes, accessibility). Acknowledge that Google Apps Script may inject its own code, but the user-written code should be standard-compliant."}
+7.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
+8.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
 
 Here are the project files:
 
@@ -229,6 +230,32 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
         config: config,
       });
 
+      const finishReason = response.candidates?.[0]?.finishReason;
+      if (finishReason && finishReason !== 'STOP') {
+          let reasonText = '';
+          switch(finishReason) {
+              case 'MAX_TOKENS':
+                  reasonText = isRussian 
+                      ? "ответ был обрезан из-за достижения максимального количества токенов."
+                      : "the response was cut off due to reaching the maximum token limit.";
+                  break;
+              case 'SAFETY':
+                  reasonText = isRussian
+                      ? "ответ был заблокирован из-за настроек безопасности."
+                      : "the response was blocked due to safety settings.";
+                  break;
+              default:
+                  reasonText = isRussian
+                      ? `ответ был прерван по причине: ${finishReason}.`
+                      : `the response was interrupted for the following reason: ${finishReason}.`;
+                  break;
+          }
+          throw new Error(isRussian
+              ? `Анализ был завершен не полностью: ${reasonText} Это часто происходит при использовании бесплатного API-ключа с низкими лимитами. Проверьте квоты вашего API-ключа в Google AI Studio.`
+              : `The analysis was not completed successfully: ${reasonText} This often happens when using a free API key with low rate limits. Please check your API key quotas in Google AI Studio.`
+          );
+      }
+
       if (schema) {
         const jsonText = response.text.trim();
         return JSON.parse(jsonText);
@@ -237,6 +264,11 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
 
     } catch (e) {
       console.error(`Gemini API call attempt ${i + 1} failed:`, e);
+      
+      if (e instanceof Error && e.message.includes('The analysis was not completed successfully')) {
+          throw e;
+      }
+
       if (i === retries - 1) { // Last attempt
         if (e instanceof Error) {
           if (e.message.includes('429')) { // HTTP 429: Too Many Requests / Rate Limit Exceeded
@@ -344,8 +376,14 @@ ${JSON.stringify({ overallSummary: analysis.overallSummary, libraryProject: anal
     ? "You MUST respond exclusively in Russian. Format your responses using Markdown for readability.\n**Отвечай лаконично и по существу, если пользователь не просит предоставить больше деталей.**"
     : "You MUST respond exclusively in English. Format your responses using Markdown for readability.\n**Answer concisely and to the point, unless the user asks for more details.**";
 
+  const changelogNote = isRussian
+    ? "**ВАЖНОЕ ЗАМЕЧАНИЕ О ПОВЕДЕНИИ:** Когда пользователь применяет предложенное тобой исправление, ты автоматически пытаешься найти и обновить файл `CHANGELOG.md`, добавляя в него описание изменения. Если тебя спросят об этом процессе, ты ДОЛЖЕН подтвердить, что это автоматическая функция. Не говори пользователю, что ему нужно обновлять журнал изменений вручную."
+    : "**IMPORTANT BEHAVIOR NOTE:** When a user applies a fix you suggested, you will automatically attempt to find and update a `CHANGELOG.md` file with a summary of the change. When asked about this process, you MUST confirm that this is an automated feature. Do not tell the user they need to update the changelog manually.";
+
   return `
 You are an expert Google Apps Script (GAS) developer and a helpful code assistant. Your memory of the project state is updated with each question.
+${changelogNote}
+
 ${analysisContext}
 ${langInstruction}
 
