@@ -1,11 +1,11 @@
+
 import React from 'react';
 import CodeBlock from './CodeBlock';
-import { Analysis, FileAnalysis, Recommendation, SuggestedFix, AnalysisStats, ConversationTurn } from '../types';
+import { Analysis, FileAnalysis, Recommendation, SuggestedFix, AnalysisStats } from '../types';
 import { AlertTriangleIcon, CheckIcon, LightbulbIcon, ShieldCheckIcon, FileTextIcon, UndoIcon, WandIcon, XIcon } from './icons';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import AnswerBlock from './AnswerBlock';
-
+import { useTranslation } from '../I18nContext';
 
 interface AnalysisResultProps {
   analysis: Analysis | null;
@@ -23,48 +23,8 @@ interface AnalysisResultProps {
   isApplyingChanges: boolean;
 }
 
-const generateMarkdownReport = (analysis: Analysis): string => {
-  let mdContent = '# Отчет по анализу кода\n\n';
-
-  mdContent += '## Общий вывод\n\n';
-  mdContent += `${analysis.overallSummary}\n\n`;
-  mdContent += '---\n\n';
-
-  const renderProjectSection = (title: string, files: FileAnalysis[]) => {
-    if (files.length === 0) return;
-    mdContent += `## ${title}\n\n`;
-    files.forEach(file => {
-      mdContent += `### Файл: \`${file.fileName}\`\n\n`;
-      file.recommendations.forEach((rec, recIndex) => {
-        mdContent += `#### Рекомендация ${recIndex + 1}${rec.appliedSuggestionIndex !== undefined ? ' (Применено)' : ''}\n\n`;
-        mdContent += `${rec.description}\n\n`;
-        if (rec.originalCodeSnippet) {
-          mdContent += '##### Проблемный код:\n';
-          mdContent += '```javascript\n';
-          mdContent += `${rec.originalCodeSnippet}\n`;
-          mdContent += '```\n\n';
-        }
-        rec.suggestions.forEach((sugg, suggIndex) => {
-          mdContent += `##### Предложение ${suggIndex + 1}: ${sugg.title}\n`;
-          mdContent += `> ${sugg.description}\n\n`;
-          mdContent += '##### Предлагаемый код:\n';
-          mdContent += '```javascript\n';
-          mdContent += `${sugg.correctedCodeSnippet}\n`;
-          mdContent += '```\n\n';
-        });
-        mdContent += '\n';
-      });
-    });
-     mdContent += '---\n\n';
-  };
-
-  renderProjectSection('Основной проект (Библиотека)', analysis.libraryProject);
-  renderProjectSection('Фронтенд-проект', analysis.frontendProject);
-
-  return mdContent;
-};
-
 const AnalysisSummary: React.FC<{ analysis: Analysis }> = ({ analysis }) => {
+  const { t, language } = useTranslation();
   const stats = React.useMemo(() => {
     let totalRecommendations = 0;
     let appliedFixes = 0;
@@ -85,6 +45,47 @@ const AnalysisSummary: React.FC<{ analysis: Analysis }> = ({ analysis }) => {
     return { totalRecommendations, appliedFixes };
   }, [analysis]);
   
+   const generateMarkdownReport = (analysis: Analysis): string => {
+    let mdContent = `# ${t('reportTitle_md')}\n\n`;
+
+    mdContent += `## ${t('overallSummary_md')}\n\n`;
+    mdContent += `${analysis.overallSummary}\n\n`;
+    mdContent += '---\n\n';
+
+    const renderProjectSection = (title: string, files: FileAnalysis[]) => {
+      if (files.length === 0) return;
+      mdContent += `## ${title}\n\n`;
+      files.forEach(file => {
+        mdContent += `### ${t('file_md')}: \`${file.fileName}\`\n\n`;
+        file.recommendations.forEach((rec, recIndex) => {
+          mdContent += `#### ${t('recommendation_md')} ${recIndex + 1}${rec.appliedSuggestionIndex !== undefined ? ` (${t('applied_md')})` : ''}\n\n`;
+          mdContent += `${rec.description}\n\n`;
+          if (rec.originalCodeSnippet) {
+            mdContent += `##### ${t('problemCode_md')}:\n`;
+            mdContent += '```javascript\n';
+            mdContent += `${rec.originalCodeSnippet}\n`;
+            mdContent += '```\n\n';
+          }
+          rec.suggestions.forEach((sugg, suggIndex) => {
+            mdContent += `##### ${t('suggestion_md')} ${suggIndex + 1}: ${sugg.title}\n`;
+            mdContent += `> ${sugg.description}\n\n`;
+            mdContent += `##### ${t('suggestedCode_md')}:\n`;
+            mdContent += '```javascript\n';
+            mdContent += `${sugg.correctedCodeSnippet}\n`;
+            mdContent += '```\n\n';
+          });
+          mdContent += '\n';
+        });
+      });
+      mdContent += '---\n\n';
+    };
+
+    renderProjectSection(t('libraryProjectTitle_md'), analysis.libraryProject);
+    renderProjectSection(t('frontendProjectTitle_md'), analysis.frontendProject);
+
+    return mdContent;
+  };
+
   const handleExport = () => {
     if (!analysis) return;
 
@@ -117,14 +118,14 @@ const AnalysisSummary: React.FC<{ analysis: Analysis }> = ({ analysis }) => {
                 <LightbulbIcon />
                 <div>
                 <div className="text-2xl font-bold text-white">{stats.totalRecommendations}</div>
-                <div className="text-sm text-gray-400">Рекомендаций</div>
+                <div className="text-sm text-gray-400">{t('recommendations')}</div>
                 </div>
             </div>
             <div className="flex items-center gap-3">
                 <ShieldCheckIcon />
                 <div>
                 <div className="text-2xl font-bold text-white">{stats.appliedFixes}</div>
-                <div className="text-sm text-gray-400">Применено</div>
+                <div className="text-sm text-gray-400">{t('applied')}</div>
                 </div>
             </div>
         </div>
@@ -133,41 +134,42 @@ const AnalysisSummary: React.FC<{ analysis: Analysis }> = ({ analysis }) => {
             className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-md text-sm transition-colors"
             >
               <FileTextIcon />
-              Экспорт отчета
+              {t('exportReport')}
           </button>
     </div>
   );
 };
 
-const formatDuration = (seconds: number | null): string => {
+const formatDuration = (seconds: number | null, t: (key: string, params?: any) => string): string => {
   if (seconds === null || isNaN(seconds)) return 'N/A';
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = Math.floor(seconds % 60);
   let result = '';
   if (minutes > 0) {
-    result += `${minutes} мин `;
+    result += `${minutes} ${t('minutes')} `;
   }
-  result += `${remainingSeconds} сек`;
+  result += `${remainingSeconds} ${t('seconds')}`;
   return result.trim();
 };
 
 const AnalysisMetrics: React.FC<{ stats: AnalysisStats }> = ({ stats }) => {
+  const { t, language } = useTranslation();
   return (
     <div className="bg-gray-900/50 border border-gray-700 rounded-lg p-4 mb-6 text-sm text-gray-400 grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div title={`Всего строк: ${stats.totalLines?.toLocaleString('ru-RU') ?? 'N/A'}`}>
-        <div className="font-semibold text-gray-200">Производительность</div>
-        <div>{stats.analysisRate?.toLocaleString('ru-RU') ?? 'N/A'} строк/мин</div>
+      <div title={`${t('totalLines')}: ${stats.totalLines?.toLocaleString(language === 'ru' ? 'ru-RU' : 'en-US') ?? 'N/A'}`}>
+        <div className="font-semibold text-gray-200">{t('performance')}</div>
+        <div>{stats.analysisRate?.toLocaleString(language === 'ru' ? 'ru-RU' : 'en-US') ?? 'N/A'} {t('linesPerMin')}</div>
       </div>
       <div>
-        <div className="font-semibold text-gray-200">Длительность</div>
-        <div>{formatDuration(stats.duration)}</div>
+        <div className="font-semibold text-gray-200">{t('duration')}</div>
+        <div>{formatDuration(stats.duration, t)}</div>
       </div>
       <div>
-        <div className="font-semibold text-gray-200">Начало анализа</div>
+        <div className="font-semibold text-gray-200">{t('analysisStart')}</div>
         <div>{stats.startTime}</div>
       </div>
       <div>
-        <div className="font-semibold text-gray-200">Окончание анализа</div>
+        <div className="font-semibold text-gray-200">{t('analysisEnd')}</div>
         <div>{stats.endTime}</div>
       </div>
     </div>
@@ -184,6 +186,7 @@ const SuggestionCard: React.FC<{
     isSelected: boolean;
     onToggleSelection: () => void;
 }> = ({ suggestion, isApplied, isAnyApplied, onApply, language, isSelected, onToggleSelection }) => {
+    const { t } = useTranslation();
     return (
         <div className={`mt-4 p-4 rounded-lg border relative ${isApplied ? 'border-green-700 bg-green-900/20' : isSelected ? 'border-indigo-500 bg-indigo-900/20' : 'border-gray-700 bg-gray-900/50'}`}>
             {!isAnyApplied && (
@@ -193,13 +196,13 @@ const SuggestionCard: React.FC<{
                   checked={isSelected}
                   onChange={onToggleSelection}
                   className="w-5 h-5 bg-gray-700 border-gray-500 rounded text-indigo-500 focus:ring-indigo-600 cursor-pointer"
-                  aria-label="Select this fix"
+                  aria-label={t('selectFixAria')}
                 />
               </div>
             )}
             <h4 className="font-semibold text-indigo-300 pr-8">{suggestion.title}</h4>
             <div className="text-gray-400 mt-1 mb-3" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(suggestion.description) as string) }} />
-            <h5 className="text-xs text-green-400 font-semibold mb-1 uppercase">Предлагаемый код:</h5>
+            <h5 className="text-xs text-green-400 font-semibold mb-1 uppercase">{t('suggestedCode')}:</h5>
             <CodeBlock language={language}>{suggestion.correctedCodeSnippet}</CodeBlock>
 
             {isApplied ? (
@@ -207,7 +210,7 @@ const SuggestionCard: React.FC<{
                     className="mt-3 w-full sm:w-auto flex items-center justify-center gap-2 bg-green-900/50 text-green-400 font-semibold px-4 py-2 rounded-md text-sm cursor-default"
                 >
                     <CheckIcon />
-                    Применено
+                    {t('appliedStatus')}
                 </div>
             ) : (
                 <button 
@@ -215,7 +218,7 @@ const SuggestionCard: React.FC<{
                     disabled={isAnyApplied}
                     className="mt-3 w-full sm:w-auto bg-green-600 text-white font-semibold px-4 py-2 rounded-md text-sm transition-all hover:bg-green-500 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:text-gray-400"
                 >
-                    Применить это исправление
+                    {t('applyThisFix')}
                 </button>
             )}
         </div>
@@ -231,6 +234,7 @@ const RecommendationCard: React.FC<{
     selectedFixes: AnalysisResultProps['selectedFixes'];
     onToggleFixSelection: AnalysisResultProps['onToggleFixSelection'];
 }> = ({ fileName, recommendation, recIndex, onApplyFix, selectedFixes, onToggleFixSelection }) => {
+  const { t } = useTranslation();
   
   const handleFix = (suggestionIndex: number) => {
     onApplyFix({
@@ -250,14 +254,14 @@ const RecommendationCard: React.FC<{
        {isAnySuggestionApplied && (
           <div className="text-xs font-bold text-green-400 uppercase mb-2 flex items-center gap-2">
             <CheckIcon />
-            Исправление применено
+            {t('fixApplied')}
           </div>
         )}
       <div className="text-gray-300 mb-3" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(recommendation.description) as string) }} />
       
       {recommendation.originalCodeSnippet && (
         <div>
-          <h4 className="text-xs text-red-400 font-semibold mb-1 uppercase">Проблемный код:</h4>
+          <h4 className="text-xs text-red-400 font-semibold mb-1 uppercase">{t('problemCode')}:</h4>
           <CodeBlock language={language}>{recommendation.originalCodeSnippet}</CodeBlock>
         </div>
       )}
@@ -310,11 +314,12 @@ const FileAnalysisCard: React.FC<{
 
 const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, hasFiles, onApplyFix, notification, onDismissNotification, analysisStats, onUndo, canUndo, selectedFixes, onToggleFixSelection, onApplySelectedFixes, isApplyingChanges }) => {
   const selectedCount = Object.keys(selectedFixes).length;
+  const { t } = useTranslation();
 
   if (isLoading) {
     return (
       <div className="p-6 text-center text-gray-400">
-        <div>Идет анализ вашего кода... Это может занять несколько секунд.</div>
+        <div>{t('analysisInProgress')}</div>
       </div>
     );
   }
@@ -335,10 +340,10 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
                   className="flex items-center gap-2 bg-gray-600 hover:bg-gray-500 text-white font-semibold px-3 py-1.5 rounded-md text-sm transition-colors"
                 >
                   <UndoIcon />
-                  Отменить
+                  {t('undo')}
                 </button>
               )}
-              <button onClick={onDismissNotification} className="text-yellow-200 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors" aria-label="Закрыть уведомление">
+              <button onClick={onDismissNotification} className="text-yellow-200 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors" aria-label={t('closeNotificationAria')}>
                   <XIcon className="w-5 h-5" />
               </button>
             </div>
@@ -350,18 +355,18 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
     
             {analysis.libraryProject.length > 0 && (
                 <div className="mb-8">
-                    <h2 className="text-xl font-bold mt-4 mb-4 text-white">Основной проект (Библиотека)</h2>
+                    <h2 className="text-xl font-bold mt-4 mb-4 text-white">{t('libraryProjectTitle')}</h2>
                     {analysis.libraryProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
                 </div>
             )}
             {analysis.frontendProject.length > 0 && (
                   <div className="mb-8">
-                    <h2 className="text-xl font-bold mt-8 mb-4 text-white">Фронтенд-проект</h2>
+                    <h2 className="text-xl font-bold mt-8 mb-4 text-white">{t('frontendProjectTitle')}</h2>
                     {analysis.frontendProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
                 </div>
             )}
             <div>
-                <h2 className="text-xl font-bold mt-8 mb-4 text-white">Общий вывод</h2>
+                <h2 className="text-xl font-bold mt-8 mb-4 text-white">{t('overallSummary')}</h2>
                 <div
                   className="text-gray-300 leading-relaxed"
                   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(analysis.overallSummary) as string) }}
@@ -369,7 +374,7 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
             </div>
             {selectedCount > 0 && (
               <div className="sticky bottom-4 inset-x-4 mt-8 p-3 bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-lg shadow-lg flex items-center justify-between gap-4">
-                <span className="font-semibold text-white">{selectedCount} исправлений выбрано</span>
+                <span className="font-semibold text-white">{t('fixesSelected', { count: selectedCount })}</span>
                 <button 
                   onClick={onApplySelectedFixes}
                   disabled={isApplyingChanges}
@@ -381,12 +386,12 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
-                      Применение...
+                      {t('applying')}...
                     </>
                   ) : (
                     <>
                       <WandIcon />
-                      Применить выбранные
+                      {t('applySelected')}
                     </>
                   )}
                 </button>
@@ -401,13 +406,13 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
   if (!hasFiles) {
     return (
         <div className="p-6 text-center text-gray-500 h-full flex items-center justify-center">
-            <div>Загрузите файлы вашего проекта, чтобы начать анализ.</div>
+            <div>{t('startAnalysisPlaceholder')}</div>
         </div>
     );
   }
   return (
       <div className="p-6 text-center text-gray-500 h-full flex items-center justify-center">
-          <div>Нажмите "Анализ", чтобы увидеть результаты здесь.</div>
+          <div>{t('runAnalysisPlaceholder')}</div>
       </div>
   );
 };

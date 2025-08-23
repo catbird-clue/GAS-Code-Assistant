@@ -1,4 +1,6 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+
+import React, from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult, FailedChange, ModelName } from './types';
 import FileUpload from './components/FileUpload';
 import AnalysisResult from './components/AnalysisResult';
@@ -8,6 +10,7 @@ import { GithubIcon, FileCodeIcon, WandIcon, DownloadIcon, XIcon, BeakerIcon, He
 import RefactorResultModal from './components/RefactorResultModal';
 import { Chat } from '@google/genai';
 import HelpModal from './components/HelpModal';
+import { useTranslation } from './I18nContext';
 
 interface Patch {
   index: number;
@@ -42,6 +45,7 @@ const getInitialUndoStack = (): UndoState[] => {
 
 
 export default function App(): React.ReactNode {
+  const { language, setLanguage, t } = useTranslation();
   const [libraryFiles, setLibraryFiles] = useState<UploadedFile[]>([]);
   const [frontendFiles, setFrontendFiles] = useState<UploadedFile[]>([]);
 
@@ -67,7 +71,6 @@ export default function App(): React.ReactNode {
   const [undoStack, setUndoStack] = useState<UndoState[]>(getInitialUndoStack);
   
   const [selectedFixes, setSelectedFixes] = useState<Record<string, {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}>>({});
-  const [changelogLang, setChangelogLang] = useState('ru');
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
   const [isTestRunPending, setIsTestRunPending] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
@@ -103,7 +106,7 @@ export default function App(): React.ReactNode {
 
   const handleLibraryFilesUploaded = (uploadedFiles: UploadedFile[]) => {
     if (libraryFiles.length > 0 && analysisResult) {
-       if (!window.confirm("Замена файлов библиотеки приведет к сбросу текущего анализа. Продолжить?")) {
+       if (!window.confirm(t('replaceLibraryWarning'))) {
         return;
       }
     }
@@ -113,7 +116,7 @@ export default function App(): React.ReactNode {
   
   const handleFrontendFilesUploaded = (uploadedFiles: UploadedFile[]) => {
      if (frontendFiles.length > 0 && analysisResult) {
-       if (!window.confirm("Замена файлов фронтенда приведет к сбросу текущего анализа. Продолжить?")) {
+       if (!window.confirm(t('replaceFrontendWarning'))) {
         return;
       }
     }
@@ -122,14 +125,14 @@ export default function App(): React.ReactNode {
   };
 
   const handleClearLibraryFiles = () => {
-    if (window.confirm("Вы уверены, что хотите удалить все файлы библиотеки и сбросить анализ?")) {
+    if (window.confirm(t('clearLibraryWarning'))) {
         setLibraryFiles([]);
         clearAnalysisAndChat();
     }
   }
   
   const handleClearFrontendFiles = () => {
-    if (window.confirm("Вы уверены, что хотите удалить все файлы фронтенда и сбросить анализ?")) {
+    if (window.confirm(t('clearFrontendWarning'))) {
         setFrontendFiles([]);
         clearAnalysisAndChat();
     }
@@ -147,7 +150,7 @@ export default function App(): React.ReactNode {
 
   const handleAnalyze = useCallback(async () => {
     if (libraryFiles.length === 0 && frontendFiles.length === 0) {
-      setError("Пожалуйста, сначала загрузите файлы.");
+      setError(t('uploadFilesFirstError'));
       return;
     }
 
@@ -165,7 +168,7 @@ export default function App(): React.ReactNode {
     const totalLines = [...libraryFiles, ...frontendFiles].reduce((acc, file) => acc + (file.content ? file.content.split('\n').length : 0), 0);
 
     try {
-      const result = await analyzeGasProject({ libraryFiles, frontendFiles, modelName });
+      const result = await analyzeGasProject({ libraryFiles, frontendFiles, modelName, language });
       setAnalysisResult(result);
       
       const endTime = new Date();
@@ -173,8 +176,8 @@ export default function App(): React.ReactNode {
       const analysisRate = duration > 0 ? Math.round((totalLines / duration) * 60) : 0;
       
       setAnalysisStats({
-        startTime: startTime.toLocaleTimeString('ru-RU'),
-        endTime: endTime.toLocaleTimeString('ru-RU'),
+        startTime: startTime.toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-US'),
+        endTime: endTime.toLocaleTimeString(language === 'ru' ? 'ru-RU' : 'en-US'),
         duration,
         totalLines,
         analysisRate
@@ -182,19 +185,19 @@ export default function App(): React.ReactNode {
 
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "Произошла неизвестная ошибка при анализе.");
+      setError(e instanceof Error ? e.message : t('analysisUnknownError'));
     } finally {
       setIsAnalyzing(false);
     }
-  }, [libraryFiles, frontendFiles, modelName]);
+  }, [libraryFiles, frontendFiles, modelName, language, t]);
 
    const handleAskQuestion = useCallback(async () => {
     if (!userQuestion.trim()) {
-      setError("Пожалуйста, введите ваш вопрос.");
+      setError(t('enterQuestionError'));
       return;
     }
     if (libraryFiles.length === 0 && frontendFiles.length === 0) {
-      setError("Пожалуйста, сначала загрузите файлы.");
+      setError(t('uploadFilesFirstError'));
       return;
     }
     
@@ -211,17 +214,18 @@ export default function App(): React.ReactNode {
         chatSession: chatSessionRef.current,
         analysis: analysisResult,
         modelName,
+        language,
       });
       setConversationHistory(prev => [...prev, { question: userQuestion, answer }]);
       chatSessionRef.current = newChatSession;
       setUserQuestion('');
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "Произошла неизвестная ошибка при обработке вопроса.");
+      setError(e instanceof Error ? e.message : t('questionUnknownError'));
     } finally {
       setIsAnswering(false);
     }
-  }, [libraryFiles, frontendFiles, userQuestion, analysisResult, modelName]);
+  }, [libraryFiles, frontendFiles, userQuestion, analysisResult, modelName, language, t]);
 
 
   const handleApplyFix = useCallback(async ({ fileName, recommendation, recIndex, suggestionIndex }: { fileName: string; recommendation: Recommendation, recIndex: number, suggestionIndex: number }) => {
@@ -235,7 +239,7 @@ export default function App(): React.ReactNode {
     setNotification(null);
     setError(null);
 
-    const instruction = `${recommendation.description}\n\nКонкретное предложение: ${suggestion.title} - ${suggestion.description}`;
+    const instruction = `${recommendation.description}\n\n${t('specificSuggestion')}: ${suggestion.title} - ${suggestion.description}`;
     setCurrentInstruction(instruction); 
     try {
        const result = await refactorCode({
@@ -245,20 +249,21 @@ export default function App(): React.ReactNode {
         libraryFiles,
         frontendFiles,
         modelName,
+        language
       });
       setCurrentRefactor(result);
     } catch (e) {
       console.error(e);
-      const errorMessage = `Произошла ошибка при рефакторинге: ${e instanceof Error ? e.message : String(e)}`;
+      const errorMessage = t('refactorError', { message: e instanceof Error ? e.message : String(e) });
       setCurrentRefactor({
-        mainChange: { fileName: '', originalCodeSnippet: 'Ошибка', correctedCodeSnippet: errorMessage},
+        mainChange: { fileName: '', originalCodeSnippet: 'Error', correctedCodeSnippet: errorMessage},
         relatedChanges: [],
         manualSteps: []
       });
     } finally {
       setIsRefactoring(false);
     }
-  }, [libraryFiles, frontendFiles, modelName]);
+  }, [libraryFiles, frontendFiles, modelName, language, t]);
 
   const applyChangesToFiles = (allChanges: RefactorChange[], currentLibraryFiles: UploadedFile[], currentFrontendFiles: UploadedFile[]): { newLibraryFiles: UploadedFile[], newFrontendFiles: UploadedFile[], failedChanges: FailedChange[] } => {
     const newLibraryFiles: UploadedFile[] = JSON.parse(JSON.stringify(currentLibraryFiles));
@@ -333,7 +338,7 @@ export default function App(): React.ReactNode {
       setNotification(null);
 
       if (!analysisResult || !refactoringRecommendation || !currentInstruction) {
-          setError("Не удалось применить исправление: отсутствует контекст. Попробуйте снова.");
+          setError(t('refactorContextError'));
           setIsApplyingChanges(false);
           setIsRefactorModalOpen(false);
           return;
@@ -343,7 +348,7 @@ export default function App(): React.ReactNode {
                         || analysisResult.frontendProject.find(f => f.fileName === refactoringRecommendation.fileName);
 
       if (!fileAnalysis || !fileAnalysis.recommendations[refactoringRecommendation.recIndex]?.originalCodeSnippet) {
-          setError(`Не удалось найти исходную рекомендацию для исправления в ${refactoringRecommendation.fileName}.`);
+          setError(t('originalRecommendationError', {fileName: refactoringRecommendation.fileName}));
           setIsApplyingChanges(false);
           return;
       }
@@ -379,12 +384,15 @@ export default function App(): React.ReactNode {
               const changelogFile = newLibraryFiles.find(f => f.name.toLowerCase() === 'changelog.md') || newFrontendFiles.find(f => f.name.toLowerCase() === 'changelog.md');
               if (changelogFile) {
                   try {
-                      const changeDescription = `В файле \`${refactoringRecommendation.fileName}\`: ${fileAnalysis.recommendations[refactoringRecommendation.recIndex].suggestions[refactoringRecommendation.suggestionIndex].title}.`;
-                      changelogFile.content = await updateChangelog({ currentChangelog: changelogFile.content, changeDescription, language: changelogLang, modelName });
+                      const changeDescription = t('changelogEntry', {
+                        fileName: refactoringRecommendation.fileName,
+                        title: fileAnalysis.recommendations[refactoringRecommendation.recIndex].suggestions[refactoringRecommendation.suggestionIndex].title
+                      });
+                      changelogFile.content = await updateChangelog({ currentChangelog: changelogFile.content, changeDescription, language, modelName });
                       changelogFile.changesCount = (changelogFile.changesCount || 0) + 1;
                   } catch (e) {
                       console.error("Failed to update changelog:", e);
-                      setError((prevError) => `${prevError || ''}\nНе удалось обновить CHANGELOG.`);
+                      setError((prevError) => `${prevError || ''}\n${t('changelogUpdateFailed')}`);
                   }
               }
               
@@ -398,7 +406,7 @@ export default function App(): React.ReactNode {
               }
               setAnalysisResult(newAnalysisResult);
               
-              setNotification(`Изменения успешно применены.`);
+              setNotification(t('changesAppliedNotification'));
               chatSessionRef.current = null;
               setIsApplyingChanges(false);
               setIsRefactorModalOpen(false);
@@ -413,7 +421,7 @@ export default function App(): React.ReactNode {
           }
 
           if (attempt < MAX_ATTEMPTS) {
-              setNotification(`Не удалось найти исходный код. Попытка №${attempt + 1}: самокоррекция...`);
+              setNotification(t('selfCorrectionAttempt', { attempt: attempt + 1 }));
               try {
                   const correctedResult = await correctRefactorResult({
                       originalResult: lastResult,
@@ -422,19 +430,20 @@ export default function App(): React.ReactNode {
                       frontendFiles: frontendFiles,
                       instruction: currentInstruction,
                       modelName,
+                      language,
                   });
                   lastResult = correctedResult;
                   setCurrentRefactor(correctedResult);
               } catch (e) {
-                  const errorMsg = `Ошибка во время самокоррекции: ${e instanceof Error ? e.message : String(e)}`;
+                  const errorMsg = t('selfCorrectionError', { message: e instanceof Error ? e.message : String(e) });
                   setError(errorMsg);
                   updateUndoStack(undoStack.slice(0, -1));
                   setIsApplyingChanges(false);
                   return;
               }
           } else {
-              const failedSnippetsText = snippetNotFoundFailures.map(f => `\n- В файле '${f.change.fileName}'`).join('');
-              const errorMsg = `Ошибка: Не удалось применить изменения после ${MAX_ATTEMPTS} попыток. Модель не смогла найти правильный исходный код для замены в следующих файлах:${failedSnippetsText}`;
+              const failedSnippetsText = snippetNotFoundFailures.map(f => `\n- In file '${f.change.fileName}'`).join('');
+              const errorMsg = t('maxAttemptsError', { maxAttempts: MAX_ATTEMPTS, failedSnippets: failedSnippetsText});
               setError(errorMsg);
               updateUndoStack(undoStack.slice(0, -1));
               setIsApplyingChanges(false);
@@ -461,7 +470,7 @@ export default function App(): React.ReactNode {
     setNotification(null);
     const fixesToApply = Object.values(selectedFixes);
     if (fixesToApply.length === 0) {
-        setError("Не выбрано ни одного исправления.");
+        setError(t('noFixesSelectedError'));
         setIsApplyingChanges(false);
         return;
     }
@@ -469,7 +478,7 @@ export default function App(): React.ReactNode {
     const instructions = fixesToApply.map(fix => ({
       fileName: fix.fileName,
       code: fix.rec.originalCodeSnippet,
-      instruction: `${fix.rec.description}\n\nКонкретное предложение: ${fix.rec.suggestions[fix.suggestionIndex].title} - ${fix.rec.suggestions[fix.suggestionIndex].description}`
+      instruction: `${fix.rec.description}\n\n${t('specificSuggestion')}: ${fix.rec.suggestions[fix.suggestionIndex].title} - ${fix.rec.suggestions[fix.suggestionIndex].description}`
     }));
 
     try {
@@ -478,6 +487,7 @@ export default function App(): React.ReactNode {
         libraryFiles,
         frontendFiles,
         modelName,
+        language,
       });
 
       pushToUndoStack({
@@ -492,7 +502,7 @@ export default function App(): React.ReactNode {
       if (failedChanges.length === result.changes.length && result.changes.length > 0) {
           updateUndoStack(undoStack.slice(0, -1));
           const failedFiles = Array.from(new Set(failedChanges.map(f => f.change.fileName))).join(', ');
-          const errorMsg = `Ошибка: Ни одно из предложенных изменений не удалось применить. Оригинальный код для замены не был найден в файлах: ${failedFiles}`;
+          const errorMsg = t('batchApplyFailedError', { failedFiles: failedFiles });
           setError(errorMsg);
           setIsApplyingChanges(false);
           return;
@@ -504,12 +514,15 @@ export default function App(): React.ReactNode {
         let changesApplied = 0;
         for (const fix of fixesToApply) {
           try {
-            const changeDescription = `В файле \`${fix.fileName}\`: ${fix.rec.suggestions[fix.suggestionIndex].title}.`;
-            currentChangelogContent = await updateChangelog({ currentChangelog: currentChangelogContent, changeDescription, language: changelogLang, modelName });
+            const changeDescription = t('changelogEntry', { 
+              fileName: fix.fileName, 
+              title: fix.rec.suggestions[fix.suggestionIndex].title 
+            });
+            currentChangelogContent = await updateChangelog({ currentChangelog: currentChangelogContent, changeDescription, language, modelName });
             changesApplied++;
           } catch(e) {
             console.error("Failed to update changelog for a fix:", e);
-            setError((prevError) => `${prevError || ''}\nНе удалось обновить CHANGELOG для исправления в ${fix.fileName}.`);
+            setError((prevError) => `${prevError || ''}\n${t('changelogUpdateError', { fileName: fix.fileName })}`);
           }
         }
         changelogFile.content = currentChangelogContent;
@@ -532,11 +545,11 @@ export default function App(): React.ReactNode {
       setAnalysisResult(newAnalysisResult);
       chatSessionRef.current = null;
       setSelectedFixes({});
-      setNotification(`${fixesToApply.length} исправлений применено.`);
+      setNotification(t('fixesAppliedNotification', { count: fixesToApply.length }));
 
     } catch(e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : "Произошла неизвестная ошибка при пакетном применении исправлений.");
+      setError(e instanceof Error ? e.message : t('batchApplyUnknownError'));
     } finally {
       setIsApplyingChanges(false);
     }
@@ -552,7 +565,7 @@ export default function App(): React.ReactNode {
             setFrontendFiles(lastState.frontendFiles);
             setAnalysisResult(lastState.analysisResult);
             updateUndoStack(newStack);
-            setNotification("Последнее изменение было отменено.");
+            setNotification(t('undoNotification'));
             chatSessionRef.current = null; // Reset chat context
         }
     }
@@ -575,7 +588,7 @@ export default function App(): React.ReactNode {
   };
   
   const handleTest = () => {
-    if ((libraryFiles.length > 0 || frontendFiles.length > 0) && !window.confirm("Это действие приведет к сбросу текущих файлов и анализа. Продолжить?")) {
+    if ((libraryFiles.length > 0 || frontendFiles.length > 0) && !window.confirm(t('testResetWarning'))) {
       return;
     }
 
@@ -648,10 +661,14 @@ function main() {
       <header className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-4 flex justify-between items-center sticky top-0 z-10">
         <h1 className="text-xl font-bold text-white flex items-center gap-2">
           <WandIcon />
-          <span>GAS Code Analyzer</span>
+          <span>{t('appTitle')}</span>
         </h1>
         <div className="flex items-center gap-4">
-          <button onClick={() => setIsHelpModalOpen(true)} className="text-gray-400 hover:text-white transition-colors" aria-label="Показать справку">
+          <div className="flex items-center gap-1 bg-gray-900 p-1 rounded-md">
+            <button onClick={() => setLanguage('en')} className={`px-2 py-1 text-xs font-bold rounded transition-colors ${language === 'en' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50'}`}>EN</button>
+            <button onClick={() => setLanguage('ru')} className={`px-2 py-1 text-xs font-bold rounded transition-colors ${language === 'ru' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50'}`}>RU</button>
+          </div>
+          <button onClick={() => setIsHelpModalOpen(true)} className="text-gray-400 hover:text-white transition-colors" aria-label={t('help')}>
             <HelpIcon />
           </button>
           <a href="https://github.com/google/generative-ai-docs" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white transition-colors">
@@ -666,7 +683,7 @@ function main() {
           <div className="bg-gray-800 rounded-lg border border-gray-700 p-6 flex flex-col gap-4">
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold text-white">1. Основной проект (Библиотека)</h2>
+                <h2 className="text-lg font-semibold text-white">{t('libraryProjectTitle')}</h2>
                 {libraryFiles.length > 0 && (
                   <span className="bg-gray-700 text-gray-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
                     {libraryFiles.length}
@@ -674,7 +691,7 @@ function main() {
                 )}
               </div>
               <div className="text-sm text-gray-400 mt-1">
-                Загрузите файлы проекта, который используется как библиотека.
+                {t('libraryProjectDescription')}
               </div>
             </div>
             {libraryFiles.length === 0 ? (
@@ -694,10 +711,10 @@ function main() {
                         ) : null}
                       </div>
                       <div className="flex items-center flex-shrink-0">
-                        <button onClick={() => handleDownloadFile(file)} className="text-gray-400 hover:text-white p-1" aria-label={`Download ${file.name}`}>
+                        <button onClick={() => handleDownloadFile(file)} className="text-gray-400 hover:text-white p-1" aria-label={t('download', {fileName: file.name})}>
                           <DownloadIcon />
                         </button>
-                        <button onClick={() => handleRemoveLibraryFile(index)} className="text-gray-400 hover:text-red-400 p-1" aria-label={`Remove ${file.name}`}>
+                        <button onClick={() => handleRemoveLibraryFile(index)} className="text-gray-400 hover:text-red-400 p-1" aria-label={t('remove', {fileName: file.name})}>
                           <XIcon className="w-4 h-4" />
                         </button>
                       </div>
@@ -708,7 +725,7 @@ function main() {
                   onClick={handleClearLibraryFiles}
                   className="w-full bg-red-600/20 text-red-300 hover:bg-red-600/40 px-4 py-2 rounded-md text-sm transition-colors"
                 >
-                  Очистить файлы
+                  {t('clearFiles')}
                 </button>
               </div>
             )}
@@ -717,7 +734,7 @@ function main() {
           <div className="bg-gray-800 rounded-lg border border-gray-700 p-6 flex flex-col gap-4">
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold text-white">2. Фронтенд-проект</h2>
+                <h2 className="text-lg font-semibold text-white">{t('frontendProjectTitle')}</h2>
                 {frontendFiles.length > 0 && (
                   <span className="bg-gray-700 text-gray-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
                     {frontendFiles.length}
@@ -725,7 +742,7 @@ function main() {
                 )}
               </div>
               <div className="text-sm text-gray-400 mt-1">
-                Загрузите файлы проекта, который использует библиотеку.
+                {t('frontendProjectDescription')}
               </div>
             </div>
              {frontendFiles.length === 0 ? (
@@ -745,10 +762,10 @@ function main() {
                         ) : null}
                       </div>
                       <div className="flex items-center flex-shrink-0">
-                        <button onClick={() => handleDownloadFile(file)} className="text-gray-400 hover:text-white p-1" aria-label={`Download ${file.name}`}>
+                        <button onClick={() => handleDownloadFile(file)} className="text-gray-400 hover:text-white p-1" aria-label={t('download', {fileName: file.name})}>
                           <DownloadIcon />
                         </button>
-                        <button onClick={() => handleRemoveFrontendFile(index)} className="text-gray-400 hover:text-red-400 p-1" aria-label={`Remove ${file.name}`}>
+                        <button onClick={() => handleRemoveFrontendFile(index)} className="text-gray-400 hover:text-red-400 p-1" aria-label={t('remove', {fileName: file.name})}>
                           <XIcon className="w-4 h-4" />
                         </button>
                       </div>
@@ -759,22 +776,22 @@ function main() {
                   onClick={handleClearFrontendFiles}
                   className="w-full bg-red-600/20 text-red-300 hover:bg-red-600/40 px-4 py-2 rounded-md text-sm transition-colors"
                 >
-                  Очистить файлы
+                  {t('clearFiles')}
                 </button>
               </div>
             )}
           </div>
           
           <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-             <h2 className="text-lg font-semibold text-white">3. Анализ и вопросы</h2>
+             <h2 className="text-lg font-semibold text-white">{t('analysisTitle')}</h2>
               <div className="flex flex-col gap-4 mt-4">
                   <textarea
                       value={userQuestion}
                       onChange={(e) => setUserQuestion(e.target.value)}
-                      placeholder="Задайте конкретный вопрос по коду..."
+                      placeholder={t('questionPlaceholder')}
                       className="w-full bg-gray-900 border border-gray-600 rounded-md p-2 text-sm text-gray-200 focus:ring-indigo-500 focus:border-indigo-500 transition"
                       rows={3}
-                      aria-label="Поле для вопроса по коду"
+                      aria-label={t('questionPlaceholder')}
                   />
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <button
@@ -788,10 +805,10 @@ function main() {
                               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
-                            Анализ...
+                            {t('analyzing')}
                           </>
                         ) : (
-                           analysisResult ? "Повторить" : "Анализ"
+                           analysisResult ? t('reanalyze') : t('analyze')
                         )}
                       </button>
                        <button
@@ -800,7 +817,7 @@ function main() {
                         className="w-full flex items-center justify-center gap-2 bg-teal-600 text-white font-semibold px-4 py-3 rounded-md transition-all hover:bg-teal-500 disabled:bg-gray-600 disabled:cursor-not-allowed disabled:text-gray-400"
                       >
                         <BeakerIcon />
-                        Тест
+                        {t('test')}
                       </button>
                       <button
                         onClick={handleAskQuestion}
@@ -813,10 +830,10 @@ function main() {
                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
-                            Отвечаю...
+                            {t('answering')}
                           </>
                         ) : (
-                          "Вопрос"
+                          t('ask')
                         )}
                       </button>
                   </div>
@@ -828,31 +845,20 @@ function main() {
                               onChange={(e) => setAutoReanalyze(e.target.checked)}
                               className="w-4 h-4 bg-gray-700 border-gray-600 rounded text-indigo-600 focus:ring-indigo-500"
                           />
-                          Автоматически запускать повторный анализ после применения исправлений
+                          {t('autoReanalyze')}
                       </label>
                       <div className="grid grid-cols-2 gap-4">
+                        <div />
                         <div className="flex items-center gap-2 text-sm text-gray-400">
-                            <label htmlFor="changelog-lang">Язык CHANGELOG:</label>
-                            <select 
-                              id="changelog-lang"
-                              value={changelogLang}
-                              onChange={(e) => setChangelogLang(e.target.value)}
-                              className="w-full bg-gray-700 border-gray-600 rounded text-white text-xs p-1 focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                              <option value="ru">Русский</option>
-                              <option value="en">English</option>
-                            </select>
-                        </div>
-                        <div className="flex items-center gap-2 text-sm text-gray-400">
-                            <label htmlFor="model-name">Модель Gemini:</label>
+                            <label htmlFor="model-name">{t('geminiModel')}</label>
                             <select 
                               id="model-name"
                               value={modelName}
                               onChange={(e) => setModelName(e.target.value as ModelName)}
                               className="w-full bg-gray-700 border-gray-600 rounded text-white text-xs p-1 focus:ring-indigo-500 focus:border-indigo-500"
                             >
-                              <option value="gemini-2.5-flash">Flash (быстрая)</option>
-                              <option value="gemini-2.5-pro">Pro (мощная)</option>
+                              <option value="gemini-2.5-flash">{t('flashModel')}</option>
+                              <option value="gemini-2.5-pro">{t('proModel')}</option>
                             </select>
                         </div>
                       </div>
@@ -866,18 +872,18 @@ function main() {
             
             {error && (
               <div className="p-4 m-4 bg-red-900/50 border border-red-700 text-red-300 rounded-md whitespace-pre-wrap">
-                <strong>Ошибка:</strong> {error}
+                <strong>{t('errorTitle')}</strong> {error}
               </div>
             )}
              <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-                <div className="flex items-center gap-2" role="tablist" aria-label="Результаты">
+                <div className="flex items-center gap-2" role="tablist" aria-label="Results">
                     <button
                     onClick={() => setActiveTab('analysis')}
                     role="tab"
                     aria-selected={activeTab === 'analysis'}
                     className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${activeTab === 'analysis' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50 hover:text-white'}`}
                     >
-                    Анализ
+                    {t('analysisTab')}
                     </button>
                     <button
                     onClick={() => setActiveTab('chat')}
@@ -885,7 +891,7 @@ function main() {
                     aria-selected={activeTab === 'chat'}
                     className={`px-3 py-2 text-sm font-semibold rounded-md transition-colors ${activeTab === 'chat' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50 hover:text-white'}`}
                     >
-                    Чат
+                    {t('chatTab')}
                     </button>
                 </div>
             </div>

@@ -1,14 +1,64 @@
+
 import React from 'react';
 import { XIcon } from './icons';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { useTranslation } from '../I18nContext';
 
 interface HelpModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const helpContent = `
+const helpContentEn = `
+# GAS Code Analyzer
+
+This tool is an intelligent assistant designed to analyze, refactor, and improve your Google Apps Script (GAS) projects. Using the power of the Gemini API, it helps identify potential issues, suggest improvements, and even automatically apply fixes.
+
+## How to Use
+
+1.  **Upload Files**: The application is divided into two upload sections:
+    *   **Main Project (Library)**: Upload the files for your main script, which is intended to be used as a library.
+    *   **Frontend Project**: Upload the project files that consume your library.
+2.  **Click "Analyze"**: After uploading the files, start the analysis. The assistant will examine all the code, its structure, and interdependencies.
+3.  **Review Recommendations**: You will receive a detailed report with recommendations for each file. These can relate to performance, security, code style, and best practices.
+4.  **Apply Fixes**: For many recommendations, automatic fixes will be suggested. You can apply them one by one or select several to apply in a batch.
+5.  **Ask a Question**: If you have a specific question about the code, use the chat feature. The assistant will answer it, considering the context of your entire project.
+
+## Key Features
+
+*   **Deep Code Analysis**: Understands the semantics and architecture of your GAS project.
+*   **Context-Aware Refactoring**: Improvement suggestions are based on how the code is used throughout the project.
+*   **Automatic Fix Application**: Save time by applying fixes with a single click. The system will automatically make changes not only to the main snippet but also to all related files.
+*   **CHANGELOG.md Updates**: When applying fixes, the assistant can automatically update the \`CHANGELOG.md\` file if it exists in your project.
+*   **Interactive Chat**: Get quick and accurate answers to questions about your code.
+
+---
+
+# Changelog
+
+## [1.2.0] - 2024-05-29
+### Added
+- Implemented a language switcher (EN/RU) for the entire UI.
+- All Gemini API prompts and outputs are now localized based on the selected language.
+
+## [1.1.0] - 2024-05-28
+### Added
+- Gemini model selection (Flash/Pro) for analysis flexibility.
+- Export functionality for analysis reports and chat history in Markdown format.
+### Changed
+- Improved the self-correction mechanism for refactoring to increase reliability.
+- Updated the design of the refactoring modal window.
+
+## [1.0.0] - 2024-05-27
+### Added
+- Initial release of GAS Code Analyzer.
+- Features for analysis, refactoring, batch fix application, and chat.
+- Ability to test with a demo project.
+- Added documentation and changelog in the help modal.
+`;
+
+const helpContentRu = `
 # GAS Code Analyzer
 
 Этот инструмент представляет собой интеллектуального ассистента, разработанного для анализа, рефакторинга и улучшения ваших проектов Google Apps Script (GAS). Используя мощь Gemini API, он помогает выявлять потенциальные проблемы, предлагать улучшения и даже автоматически применять исправления.
@@ -35,8 +85,12 @@ const helpContent = `
 
 # Журнал изменений
 
-## [1.1.0] - 2024-05-28
+## [1.2.0] - 2024-05-29
+### Добавлено
+- Реализован переключатель языка (EN/RU) для всего интерфейса.
+- Все запросы и ответы от Gemini API теперь локализованы в соответствии с выбранным языком.
 
+## [1.1.0] - 2024-05-28
 ### Добавлено
 - Выбор модели Gemini (Flash/Pro) для гибкости анализа.
 - Экспорт отчета по анализу и истории чата в формате Markdown.
@@ -46,7 +100,6 @@ const helpContent = `
 - Обновлен дизайн модального окна для рефакторинга.
 
 ## [1.0.0] - 2024-05-27
-
 ### Добавлено
 - Первоначальный выпуск GAS Code Analyzer.
 - Функции анализа, рефакторинга, пакетного применения исправлений и чата.
@@ -55,8 +108,10 @@ const helpContent = `
 `;
 
 const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
+  const { t, language } = useTranslation();
   if (!isOpen) return null;
 
+  const helpContent = language === 'ru' ? helpContentRu : helpContentEn;
   const sanitizedHtml = DOMPurify.sanitize(marked.parse(helpContent) as string);
 
   return (
@@ -69,7 +124,7 @@ const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
         onClick={e => e.stopPropagation()}
       >
         <header className="flex items-center justify-between p-4 border-b border-gray-700 flex-shrink-0">
-          <h2 className="text-lg font-semibold text-white">Справка и информация о приложении</h2>
+          <h2 className="text-lg font-semibold text-white">{t('helpTitle')}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white">
             <XIcon />
           </button>

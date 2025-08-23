@@ -1,5 +1,7 @@
+
 import { GoogleGenAI, Type, Chat } from "@google/genai";
 import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation, FailedChange, ModelName } from '../types';
+import { Language } from "../I18nContext";
 
 const API_KEY = process.env.API_KEY;
 
@@ -19,99 +21,174 @@ const createProjectSection = (title: string, files: UploadedFile[]): string => {
   return `## ${title}\n\n${fileContents}`;
 };
 
-const analysisSchema = {
-  type: Type.OBJECT,
-  properties: {
-    libraryProject: {
-      type: Type.ARRAY,
-      description: "Анализ для каждого файла в проекте-библиотеке.",
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          fileName: { type: Type.STRING, description: "Имя файла." },
-          recommendations: {
-            type: Type.ARRAY,
-            description: "Список рекомендаций для этого файла.",
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                description: { type: Type.STRING, description: "Общее описание проблемы." },
-                originalCodeSnippet: { type: Type.STRING, description: "Оригинальный фрагмент кода, который нужно исправить. Null, если не применимо." },
-                suggestions: {
-                  type: Type.ARRAY,
-                  description: "Список из одного или нескольких предлагаемых исправлений проблемы.",
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING, description: "Короткий, понятный заголовок для этого конкретного исправления. Например, 'Использовать PropertiesService'." },
-                      description: { type: Type.STRING, description: "Подробное объяснение этого конкретного предлагаемого подхода." },
-                      correctedCodeSnippet: { type: Type.STRING, description: "Исправленный фрагмент кода для этого конкретного предложения." },
-                    },
-                    required: ['title', 'description', 'correctedCodeSnippet']
-                  }
+const getSchemas = (language: Language) => {
+    const isRussian = language === 'ru';
+    
+    const analysisSchema = {
+      type: Type.OBJECT,
+      properties: {
+        libraryProject: {
+          type: Type.ARRAY,
+          description: isRussian ? "Анализ для каждого файла в проекте-библиотеке." : "Analysis for each file in the library project.",
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              fileName: { type: Type.STRING, description: isRussian ? "Имя файла." : "The file name." },
+              recommendations: {
+                type: Type.ARRAY,
+                description: isRussian ? "Список рекомендаций для этого файла." : "A list of recommendations for this file.",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    description: { type: Type.STRING, description: isRussian ? "Общее описание проблемы." : "A general description of the issue." },
+                    originalCodeSnippet: { type: Type.STRING, description: isRussian ? "Оригинальный фрагмент кода, который нужно исправить. Null, если не применимо." : "The original code snippet to be fixed. Null if not applicable." },
+                    suggestions: {
+                      type: Type.ARRAY,
+                      description: isRussian ? "Список из одного или нескольких предлагаемых исправлений проблемы." : "A list of one or more suggested fixes for the issue.",
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          title: { type: Type.STRING, description: isRussian ? "Короткий, понятный заголовок для этого конкретного исправления. Например, 'Использовать PropertiesService'." : "A short, clear title for this specific fix. E.g., 'Use PropertiesService'." },
+                          description: { type: Type.STRING, description: isRussian ? "Подробное объяснение этого конкретного предлагаемого подхода." : "A detailed explanation of this specific suggested approach." },
+                          correctedCodeSnippet: { type: Type.STRING, description: isRussian ? "Исправленный фрагмент кода для этого конкретного предложения." : "The corrected code snippet for this specific suggestion." },
+                        },
+                        required: ['title', 'description', 'correctedCodeSnippet']
+                      }
+                    }
+                  },
+                  required: ['description', 'originalCodeSnippet', 'suggestions']
                 }
-              },
-              required: ['description', 'originalCodeSnippet', 'suggestions']
-            }
+              }
+            },
+            required: ['fileName', 'recommendations']
           }
         },
-        required: ['fileName', 'recommendations']
-      }
-    },
-    frontendProject: {
-      type: Type.ARRAY,
-      description: "Анализ для каждого файла во фронтенд-проекте.",
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          fileName: { type: Type.STRING, description: "Имя файла." },
-          recommendations: {
-            type: Type.ARRAY,
-            description: "Список рекомендаций для этого файла.",
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                description: { type: Type.STRING, description: "Общее описание проблемы." },
-                originalCodeSnippet: { type: Type.STRING, description: "Оригинальный фрагмент кода, который нужно исправить. Null, если не применимо." },
-                suggestions: {
-                  type: Type.ARRAY,
-                  description: "Список из одного или нескольких предлагаемых исправлений проблемы.",
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING, description: "Короткий, понятный заголовок для этого конкретного исправления. Например, 'Использовать PropertiesService'." },
-                      description: { type: Type.STRING, description: "Подробное объяснение этого конкретного предлагаемого подхода." },
-                      correctedCodeSnippet: { type: Type.STRING, description: "Исправленный фрагмент кода для этого конкретного предложения." },
-                    },
-                    required: ['title', 'description', 'correctedCodeSnippet']
-                  }
+        frontendProject: {
+          type: Type.ARRAY,
+          description: isRussian ? "Анализ для каждого файла во фронтенд-проекте." : "Analysis for each file in the frontend project.",
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              fileName: { type: Type.STRING, description: isRussian ? "Имя файла." : "The file name." },
+              recommendations: {
+                type: Type.ARRAY,
+                description: isRussian ? "Список рекомендаций для этого файла." : "A list of recommendations for this file.",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    description: { type: Type.STRING, description: isRussian ? "Общее описание проблемы." : "A general description of the issue." },
+                    originalCodeSnippet: { type: Type.STRING, description: isRussian ? "Оригинальный фрагмент кода, который нужно исправить. Null, если не применимо." : "The original code snippet to be fixed. Null if not applicable." },
+                    suggestions: {
+                      type: Type.ARRAY,
+                      description: isRussian ? "Список из одного или нескольких предлагаемых исправлений проблемы." : "A list of one or more suggested fixes for the issue.",
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          title: { type: Type.STRING, description: isRussian ? "Короткий, понятный заголовок для этого конкретного исправления. Например, 'Использовать PropertiesService'." : "A short, clear title for this specific fix. E.g., 'Use PropertiesService'." },
+                          description: { type: Type.STRING, description: isRussian ? "Подробное объяснение этого конкретного предлагаемого подхода." : "A detailed explanation of this specific suggested approach." },
+                          correctedCodeSnippet: { type: Type.STRING, description: isRussian ? "Исправленный фрагмент кода для этого конкретного предложения." : "The corrected code snippet for this specific suggestion." },
+                        },
+                        required: ['title', 'description', 'correctedCodeSnippet']
+                      }
+                    }
+                  },
+                  required: ['description', 'originalCodeSnippet', 'suggestions']
                 }
-              },
-              required: ['description', 'originalCodeSnippet', 'suggestions']
-            }
+              }
+            },
+            required: ['fileName', 'recommendations']
           }
         },
-        required: ['fileName', 'recommendations']
-      }
-    },
-    overallSummary: { type: Type.STRING, description: "Общий вывод и рекомендации по всему проекту." }
-  },
-  required: ['libraryProject', 'frontendProject', 'overallSummary']
-};
+        overallSummary: { type: Type.STRING, description: isRussian ? "Общий вывод и рекомендации по всему проекту." : "An overall summary and recommendations for the entire project." }
+      },
+      required: ['libraryProject', 'frontendProject', 'overallSummary']
+    };
+
+    const refactorChangeSchema = {
+        type: Type.OBJECT,
+        properties: {
+            fileName: { type: Type.STRING },
+            description: { type: Type.STRING },
+            originalCodeSnippet: { type: Type.STRING },
+            correctedCodeSnippet: { type: Type.STRING },
+        },
+        required: ['fileName', 'description', 'originalCodeSnippet', 'correctedCodeSnippet']
+    };
+
+    const manualStepSchema = {
+        type: Type.OBJECT,
+        properties: {
+            title: { type: Type.STRING, description: isRussian ? "Короткий, ясный заголовок для ручного действия. Например, 'Обновить электронную таблицу'." : "A short, clear title for the manual action. E.g., 'Update Spreadsheet'." },
+            description: { type: Type.STRING, description: isRussian ? "Подробное, пошаговое описание того, что пользователь должен сделать вручную. Включите любые конкретные значения или имена, которые он должен использовать." : "A detailed, step-by-step description of what the user needs to do manually. Include any specific values or names they should use." },
+            fileName: { type: Type.STRING, description: isRussian ? "Имя соответствующего файла для этого ручного шага, если применимо." : "The name of the relevant file for this manual step, if applicable." }
+        },
+        required: ['title', 'description']
+    };
+
+    const refactorSchema = {
+        type: Type.OBJECT,
+        properties: {
+            mainChange: {
+                type: Type.OBJECT,
+                properties: {
+                    fileName: { type: Type.STRING, description: isRussian ? "Имя файла основного изменения." : "The filename of the main change." },
+                    originalCodeSnippet: { type: Type.STRING },
+                    correctedCodeSnippet: { type: Type.STRING },
+                },
+                required: ['fileName', 'originalCodeSnippet', 'correctedCodeSnippet']
+            },
+            relatedChanges: {
+                type: Type.ARRAY,
+                description: isRussian ? "Список связанных изменений в других файлах." : "A list of related changes in other files.",
+                items: refactorChangeSchema
+            },
+            manualSteps: {
+                type: Type.ARRAY,
+                description: isRussian ? "Список ручных действий, которые пользователь ДОЛЖЕН выполнить после применения изменений в коде. Например, установка свойства скрипта или обновление электронной таблицы. Если ручные шаги не требуются, верните пустой массив." : "A list of manual actions the user MUST perform after applying the code changes. E.g., setting a script property or updating a spreadsheet. Return an empty array if no manual steps are required.",
+                items: manualStepSchema
+            }
+        },
+        required: ['mainChange', 'relatedChanges', 'manualSteps']
+    };
+
+    const batchRefactorSchema = {
+        type: Type.OBJECT,
+        properties: {
+            changes: {
+                type: Type.ARRAY,
+                description: isRussian ? "Консолидированный список всех изменений кода, необходимых во всех файлах." : "A consolidated list of all code changes required across all files.",
+                items: refactorChangeSchema
+            },
+            manualSteps: {
+                type: Type.ARRAY,
+                description: isRussian ? "Консолидированный список уникальных ручных шагов, необходимых после применения всех изменений." : "A consolidated list of unique manual steps required after all changes are applied.",
+                items: manualStepSchema
+            }
+        },
+        required: ['changes', 'manualSteps']
+    };
+
+    return { analysisSchema, refactorSchema, batchRefactorSchema };
+}
 
 
-function buildAnalysisPrompt({ libraryFiles, frontendFiles }: { libraryFiles: UploadedFile[], frontendFiles: UploadedFile[] }): string {
-  const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
-  const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
+function buildAnalysisPrompt({ libraryFiles, frontendFiles, language }: { libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], language: Language }): string {
+  const isRussian = language === 'ru';
+  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
+  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
+  
+  const langInstruction = isRussian 
+    ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, suggestions, and summaries, must be in Russian."
+    : "You MUST respond exclusively in English. All text, including descriptions, titles, suggestions, and summaries, must be in English.";
 
   return `
 You are an expert Google Apps Script (GAS) developer and code reviewer. Your task is to analyze the provided GAS project files and return your analysis in a structured JSON format.
-You MUST respond exclusively in Russian. All text, including descriptions, titles, suggestions, and summaries, must be in Russian.
+${langInstruction}
 
 **Project Structure:**
 This project consists of two parts:
-1.  **Основной проект (Библиотека):** The core logic, intended to be used as a library.
-2.  **Фронтенд-проект:** A project that consumes the main project as a library.
+1.  **${isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)"}:** The core logic, intended to be used as a library.
+2.  **${isRussian ? "Фронтенд-проект" : "Frontend Project"}:** A project that consumes the main project as a library.
 
 Analyze them with this relationship in mind.
 
@@ -135,7 +212,8 @@ ${frontendSection}
 `;
 }
 
-async function handleGeminiCallWithRetry(prompt: string, schema: object | null, modelName: ModelName, retries = 3) {
+async function handleGeminiCallWithRetry(prompt: string, schema: object | null, modelName: ModelName, language: Language, retries = 3) {
+  const isRussian = language === 'ru';
   for (let i = 0; i < retries; i++) {
     try {
       const config: any = {};
@@ -161,16 +239,28 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
       if (i === retries - 1) { // Last attempt
         if (e instanceof Error) {
           if (e.message.includes('429')) { // HTTP 429: Too Many Requests / Rate Limit Exceeded
-            throw new Error(`Достигнут дневной лимит запросов к API Gemini (модель '${modelName}'). Пожалуйста, попробуйте снова завтра. Для снятия ограничений рассмотрите возможность перехода на тарифный план с оплатой по мере использования (Pay-as-you-go) в Google AI Studio.`);
+            throw new Error(isRussian 
+                ? `Достигнут дневной лимит запросов к API Gemini (модель '${modelName}'). Пожалуйста, попробуйте снова завтра. Для снятия ограничений рассмотрите возможность перехода на тарифный план с оплатой по мере использования (Pay-as-you-go) в Google AI Studio.`
+                : `Daily request limit for Gemini API (model '${modelName}') has been reached. Please try again tomorrow. To lift these limits, consider upgrading to a Pay-as-you-go plan in Google AI Studio.`
+            );
           }
           if (e.message.includes('Rpc failed')) {
-            throw new Error("Не удалось подключиться к API Gemini. Это может быть связано с сетевыми ограничениями в вашей среде. Убедитесь, что у вас есть прямое подключение к generativelanguage.googleapis.com.");
+            throw new Error(isRussian
+                ? "Не удалось подключиться к API Gemini. Это может быть связано с сетевыми ограничениями в вашей среде. Убедитесь, что у вас есть прямое подключение к generativelanguage.googleapis.com."
+                : "Failed to connect to the Gemini API. This may be due to network restrictions in your environment. Ensure you have a direct connection to generativelanguage.googleapis.com."
+            );
           }
           if (e.message.includes('JSON')) {
-            throw new Error("API вернул ответ в неправильном формате JSON. Проверьте консоль для деталей.");
+            throw new Error(isRussian 
+                ? "API вернул ответ в неправильном формате JSON. Проверьте консоль для деталей."
+                : "The API returned an incorrectly formatted JSON response. Check the console for details."
+            );
           }
         }
-        throw new Error(`Произошла неизвестная ошибка при вызове API после ${retries} попыток: ${e instanceof Error ? e.message : String(e)}`);
+        throw new Error(isRussian
+            ? `Произошла неизвестная ошибка при вызове API после ${retries} попыток: ${e instanceof Error ? e.message : String(e)}`
+            : `An unknown error occurred after ${retries} API call attempts: ${e instanceof Error ? e.message : String(e)}`
+        );
       }
       await new Promise(res => setTimeout(res, 1000 * (i + 1))); // Exponential backoff
     }
@@ -178,9 +268,10 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
 }
 
 
-export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName }: { libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], modelName: ModelName }): Promise<Analysis> {
-  const prompt = buildAnalysisPrompt({ libraryFiles, frontendFiles });
-  return handleGeminiCallWithRetry(prompt, analysisSchema, modelName);
+export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName, language }: { libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], modelName: ModelName, language: Language }): Promise<Analysis> {
+  const prompt = buildAnalysisPrompt({ libraryFiles, frontendFiles, language });
+  const { analysisSchema } = getSchemas(language);
+  return handleGeminiCallWithRetry(prompt, analysisSchema, modelName, language);
 }
 
 interface AskQuestionParams {
@@ -190,11 +281,13 @@ interface AskQuestionParams {
   chatSession?: Chat | null;
   analysis?: Analysis | null;
   modelName: ModelName;
+  language: Language;
 }
 
-function buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis }: Omit<AskQuestionParams, 'chatSession' | 'modelName'>): string {
-  const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
-  const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
+function buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis, language }: Omit<AskQuestionParams, 'chatSession' | 'modelName'>): string {
+  const isRussian = language === 'ru';
+  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
+  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
 
   let analysisContext = '';
 
@@ -205,35 +298,57 @@ function buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, ana
 
       if (appliedFixes.length > 0) {
           const fixesList = appliedFixes.map(rec => 
-              `- В файле \`${rec.fileName}\`: "${rec.suggestions[rec.appliedSuggestionIndex!].title}"`
+              isRussian 
+                ? `- В файле \`${rec.fileName}\`: "${rec.suggestions[rec.appliedSuggestionIndex!].title}"`
+                : `- In file \`${rec.fileName}\`: "${rec.suggestions[rec.appliedSuggestionIndex!].title}"`
           ).join('\n');
-
-          analysisContext = `
+          
+          analysisContext = isRussian
+            ? `
 **КРИТИЧЕСКИ ВАЖНЫЙ КОНТЕКСТ:**
 Ты ранее провел анализ этого проекта. С тех пор пользователь **применил следующие исправления**:\n${fixesList}
 Код, который предоставлен ниже, является **АКТУАЛЬНОЙ ВЕРСИЕЙ**. Твой предыдущий анализ теперь частично устарел.
 Твоя задача — отвечать на вопросы, основываясь ИСКЛЮЧИТЕЛЬНО на **ТЕКУЩЕМ СОСТОЯНИИ КОДА**. Не ссылайся на рекомендации из старого анализа, которые уже были применены.
+`
+            : `
+**CRITICALLY IMPORTANT CONTEXT:**
+You previously analyzed this project. Since then, the user has **applied the following fixes**:\n${fixesList}
+The code provided below is the **CURRENT VERSION**. Your previous analysis is now partially outdated.
+Your task is to answer questions based ONLY on the **CURRENT STATE OF THE CODE**. Do not refer to recommendations from the old analysis that have already been applied.
 `;
       } else {
-        analysisContext = `
+        analysisContext = isRussian
+            ? `
 **КОНТЕКСТ:**
 Ты уже провел анализ этого проекта. Вот его результаты. Используй их как основной контекст для ответов.
+<analysis_results>
+${JSON.stringify({ overallSummary: analysis.overallSummary, libraryProject: analysis.libraryProject, frontendProject: analysis.frontendProject }, null, 2)}
+</analysis_results>
+`
+            : `
+**CONTEXT:**
+You have already analyzed this project. Here are the results. Use them as the primary context for your answers.
 <analysis_results>
 ${JSON.stringify({ overallSummary: analysis.overallSummary, libraryProject: analysis.libraryProject, frontendProject: analysis.frontendProject }, null, 2)}
 </analysis_results>
 `;
       }
   } else {
-    analysisContext = `Это начало нашего разговора. Я предоставляю тебе полный код проекта. Пожалуйста, проанализируй его и ответь на мой первый вопрос.`;
+    analysisContext = isRussian 
+        ? `Это начало нашего разговора. Я предоставляю тебе полный код проекта. Пожалуйста, проанализируй его и ответь на мой первый вопрос.`
+        : `This is the beginning of our conversation. I am providing you with the full project code. Please analyze it and answer my first question.`;
   }
+  
+  const langInstruction = isRussian 
+    ? "You MUST respond exclusively in Russian. Format your responses using Markdown for readability.\n**Отвечай лаконично и по существу, если пользователь не просит предоставить больше деталей.**"
+    : "You MUST respond exclusively in English. Format your responses using Markdown for readability.\n**Answer concisely and to the point, unless the user asks for more details.**";
 
   return `
 You are an expert Google Apps Script (GAS) developer and a helpful code assistant. Your memory of the project state is updated with each question.
 ${analysisContext}
-You MUST respond exclusively in Russian. Format your responses using Markdown for readability.
-**Отвечай лаконично и по существу, если пользователь не просит предоставить больше деталей.**
+${langInstruction}
 
-**Вот файлы проекта (это их АКТУАЛЬНОЕ состояние):**
+**Here are the project files (this is their CURRENT state):**
 
 ${librarySection}
 
@@ -241,21 +356,22 @@ ${frontendSection}
 
 ---
 
-**Мой вопрос:**
+**My question:**
 "${question}"
 `;
 }
 
 
 
-export async function askQuestionAboutCode({ libraryFiles, frontendFiles, question, chatSession, analysis, modelName }: AskQuestionParams): Promise<{ answer: string; chatSession: Chat }> {
+export async function askQuestionAboutCode({ libraryFiles, frontendFiles, question, chatSession, analysis, modelName, language }: AskQuestionParams): Promise<{ answer: string; chatSession: Chat }> {
+  const isRussian = language === 'ru';
   try {
     if (chatSession) {
       const response = await chatSession.sendMessage({ message: question });
       return { answer: response.text.trim(), chatSession };
     } else {
       const chat = ai.chats.create({ model: modelName });
-      const initialPrompt = buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis });
+      const initialPrompt = buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis, language });
       const response = await chat.sendMessage({ message: initialPrompt });
       return { answer: response.text.trim(), chatSession: chat };
     }
@@ -263,13 +379,22 @@ export async function askQuestionAboutCode({ libraryFiles, frontendFiles, questi
     console.error("Gemini API call for question failed:", e);
     if (e instanceof Error) {
         if (e.message.includes('429')) {
-             throw new Error(`Достигнут дневной лимит запросов к API Gemini (модель '${modelName}'). Пожалуйста, попробуйте снова завтра. Для снятия ограничений рассмотрите возможность перехода на тарифный план с оплатой по мере использования (Pay-as-you-go) в Google AI Studio.`);
+             throw new Error(isRussian 
+                ? `Достигнут дневной лимит запросов к API Gemini (модель '${modelName}'). Пожалуйста, попробуйте снова завтра. Для снятия ограничений рассмотрите возможность перехода на тарифный план с оплатой по мере использования (Pay-as-you-go) в Google AI Studio.`
+                : `Daily request limit for Gemini API (model '${modelName}') has been reached. Please try again tomorrow. To lift these limits, consider upgrading to a Pay-as-you-go plan in Google AI Studio.`
+            );
         }
         if (e.message.includes('Rpc failed')) {
-            throw new Error("Не удалось подключиться к API Gemini. Это может быть связано с сетевыми ограничениями в вашей среде. Убедитесь, что у вас есть прямое подключение к generativelanguage.googleapis.com.");
+            throw new Error(isRussian
+                ? "Не удалось подключиться к API Gemini. Это может быть связано с сетевыми ограничениями в вашей среде. Убедитесь, что у вас есть прямое подключение к generativelanguage.googleapis.com."
+                : "Failed to connect to the Gemini API. This may be due to network restrictions in your environment. Ensure you have a direct connection to generativelanguage.googleapis.com."
+            );
         }
     }
-    throw new Error(`Произошла неизвестная ошибка при вызове API: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(isRussian
+        ? `Произошла неизвестная ошибка при вызове API: ${e instanceof Error ? e.message : String(e)}`
+        : `An unknown error occurred during an API call: ${e instanceof Error ? e.message : String(e)}`
+    );
   }
 }
 
@@ -280,64 +405,22 @@ interface RefactorCodeParams {
   libraryFiles: UploadedFile[];
   frontendFiles: UploadedFile[];
   modelName: ModelName;
+  language: Language;
 }
 
-const refactorChangeSchema = {
-    type: Type.OBJECT,
-    properties: {
-        fileName: { type: Type.STRING },
-        description: { type: Type.STRING },
-        originalCodeSnippet: { type: Type.STRING },
-        correctedCodeSnippet: { type: Type.STRING },
-    },
-    required: ['fileName', 'description', 'originalCodeSnippet', 'correctedCodeSnippet']
-};
-
-const manualStepSchema = {
-    type: Type.OBJECT,
-    properties: {
-        title: { type: Type.STRING, description: "Короткий, ясный заголовок для ручного действия. Например, 'Обновить электронную таблицу'." },
-        description: { type: Type.STRING, description: "Подробное, пошаговое описание того, что пользователь должен сделать вручную. Включите любые конкретные значения или имена, которые он должен использовать." },
-        fileName: { type: Type.STRING, description: "Имя соответствующего файла для этого ручного шага, если применимо." }
-    },
-    required: ['title', 'description']
-};
-
-const refactorSchema = {
-    type: Type.OBJECT,
-    properties: {
-        mainChange: {
-            type: Type.OBJECT,
-            properties: {
-                fileName: { type: Type.STRING, description: "Имя файла основного изменения." },
-                originalCodeSnippet: { type: Type.STRING },
-                correctedCodeSnippet: { type: Type.STRING },
-            },
-            required: ['fileName', 'originalCodeSnippet', 'correctedCodeSnippet']
-        },
-        relatedChanges: {
-            type: Type.ARRAY,
-            description: "Список связанных изменений в других файлах.",
-            items: refactorChangeSchema
-        },
-        manualSteps: {
-            type: Type.ARRAY,
-            description: "Список ручных действий, которые пользователь ДОЛЖЕН выполнить после применения изменений в коде. Например, установка свойства скрипта или обновление электронной таблицы. Если ручные шаги не требуются, верните пустой массив.",
-            items: manualStepSchema
-        }
-    },
-    required: ['mainChange', 'relatedChanges', 'manualSteps']
-};
-
-
-export async function refactorCode({ code, instruction, fileName, libraryFiles, frontendFiles, modelName }: RefactorCodeParams): Promise<RefactorResult> {
-  const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
-  const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
+export async function refactorCode({ code, instruction, fileName, libraryFiles, frontendFiles, modelName, language }: RefactorCodeParams): Promise<RefactorResult> {
+  const isRussian = language === 'ru';
+  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
+  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
   
+  const langInstruction = isRussian
+    ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, and manual steps, must be in Russian."
+    : "You MUST respond exclusively in English. All text, including descriptions, titles, and manual steps, must be in English.";
+
   const prompt = `
 You are an expert Google Apps Script (GAS) developer specializing in context-aware code refactoring.
 Your task is to refactor a specific code snippet based on the provided instruction and return a structured JSON object detailing all necessary changes. 
-You MUST respond exclusively in Russian. All text, including descriptions, titles, and manual steps, must be in Russian.
+${langInstruction}
 
 **Instruction for refactoring:**
 ${instruction}
@@ -374,8 +457,8 @@ ${frontendSection}
     *   Manually authorizing a new OAuth scope.
 6.  **Populate 'manualSteps':** If any such actions are required, populate the \`manualSteps\` array with clear, step-by-step instructions. If no manual steps are needed, this array MUST be empty.
 `;
-
-  return handleGeminiCallWithRetry(prompt, refactorSchema, modelName);
+  const { refactorSchema } = getSchemas(language);
+  return handleGeminiCallWithRetry(prompt, refactorSchema, modelName, language);
 }
 
 interface CorrectRefactorParams {
@@ -385,18 +468,26 @@ interface CorrectRefactorParams {
   frontendFiles: UploadedFile[];
   instruction: string;
   modelName: ModelName;
+  language: Language;
 }
 
-export async function correctRefactorResult({ failedChanges, libraryFiles, frontendFiles, instruction, modelName }: CorrectRefactorParams): Promise<RefactorResult> {
-  const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
-  const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
+export async function correctRefactorResult({ failedChanges, libraryFiles, frontendFiles, instruction, modelName, language }: CorrectRefactorParams): Promise<RefactorResult> {
+  const isRussian = language === 'ru';
+  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
+  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
 
   const failedSnippetsText = failedChanges
-    .map(f => `- В файле \`${f.change.fileName}\`, не удалось найти следующий фрагмент:\n\`\`\`\n${f.change.originalCodeSnippet}\n\`\`\``)
-    .join('\n');
+    .map(f => isRussian 
+        ? `- В файле \`${f.change.fileName}\`, не удалось найти следующий фрагмент:\n\`\`\`\n${f.change.originalCodeSnippet}\n\`\`\``
+        : `- In file \`${f.change.fileName}\`, the following snippet was not found:\n\`\`\`\n${f.change.originalCodeSnippet}\n\`\`\``
+    ).join('\n');
+    
+  const langInstruction = isRussian
+    ? "Your task is to try again and fix your mistake. You MUST respond exclusively in Russian."
+    : "Your task is to try again and fix your mistake. You MUST respond exclusively in English.";
 
   const prompt = `
-You are a self-correcting AI assistant for Google Apps Script. Your previous attempt to refactor code failed because you provided incorrect \`originalCodeSnippet\` values that were not found in the source files. Your task is to try again and fix your mistake. You MUST respond exclusively in Russian.
+You are a self-correcting AI assistant for Google Apps Script. Your previous attempt to refactor code failed because you provided incorrect \`originalCodeSnippet\` values that were not found in the source files. ${langInstruction}
 
 **Original Refactoring Goal:**
 ${instruction}
@@ -421,32 +512,19 @@ ${frontendSection}
 3.  **FIX THE SNIPPETS:** The most important task is to fix your previous mistake. For every \`originalCodeSnippet\` in your new plan, it **MUST** be a perfect, verbatim, character-for-character copy from the project files provided above. Check indentation, comments, and whitespace. This is the only way the automated tool can apply your changes.
 4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
 `;
-
-  return handleGeminiCallWithRetry(prompt, refactorSchema, modelName);
+  const { refactorSchema } = getSchemas(language);
+  return handleGeminiCallWithRetry(prompt, refactorSchema, modelName, language);
 }
 
 
-const batchRefactorSchema = {
-    type: Type.OBJECT,
-    properties: {
-        changes: {
-            type: Type.ARRAY,
-            description: "A consolidated list of all code changes required across all files.",
-            items: refactorChangeSchema
-        },
-        manualSteps: {
-            type: Type.ARRAY,
-            description: "A consolidated list of unique manual steps required after all changes are applied.",
-            items: manualStepSchema
-        }
-    },
-    required: ['changes', 'manualSteps']
-};
-
-
-export async function batchRefactorCode({ instructions, libraryFiles, frontendFiles, modelName }: { instructions: BatchInstruction[], libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], modelName: ModelName }): Promise<BatchRefactorResult> {
-  const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
-  const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
+export async function batchRefactorCode({ instructions, libraryFiles, frontendFiles, modelName, language }: { instructions: BatchInstruction[], libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], modelName: ModelName, language: Language }): Promise<BatchRefactorResult> {
+  const isRussian = language === 'ru';
+  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
+  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
+  
+  const langInstruction = isRussian
+    ? "You MUST respond exclusively in Russian."
+    : "You MUST respond exclusively in English.";
 
   const instructionsText = instructions.map((instr, index) => `
     **Task ${index + 1}:**
@@ -461,7 +539,7 @@ export async function batchRefactorCode({ instructions, libraryFiles, frontendFi
   const prompt = `
 You are an expert Google Apps Script (GAS) developer specializing in context-aware, batch code refactoring.
 Your task is to perform multiple refactoring tasks across the entire project simultaneously. You will receive a list of tasks. You must analyze their combined impact and produce a single, consolidated list of changes in a JSON object.
-You MUST respond exclusively in Russian.
+${langInstruction}
 
 **Full Project Context:**
 ${librarySection}
@@ -484,12 +562,12 @@ ${instructionsText}
 3.  **Consolidate Manual Steps:** Review all changes and create a consolidated, de-duplicated list of any manual follow-up actions required.
 4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
 `;
-
-  return handleGeminiCallWithRetry(prompt, batchRefactorSchema, modelName);
+  const { batchRefactorSchema } = getSchemas(language);
+  return handleGeminiCallWithRetry(prompt, batchRefactorSchema, modelName, language);
 }
 
 
-function buildChangelogPrompt(currentChangelog: string, changeDescription: string, language: string): string {
+function buildChangelogPrompt(currentChangelog: string, changeDescription: string, language: Language): string {
   const langInstruction = language === 'en' 
     ? "You MUST respond exclusively in English. All changelog entries must be in English."
     : "You MUST respond exclusively in Russian. Все записи в журнале изменений должны быть на русском языке.";
@@ -520,10 +598,10 @@ ${currentChangelog}
 Now, provide the full updated CHANGELOG.md content.`;
 }
 
-export async function updateChangelog({ currentChangelog, changeDescription, language = 'ru', modelName }: { currentChangelog: string, changeDescription: string, language: string, modelName: ModelName }): Promise<string> {
+export async function updateChangelog({ currentChangelog, changeDescription, language, modelName }: { currentChangelog: string, changeDescription: string, language: Language, modelName: ModelName }): Promise<string> {
   const prompt = buildChangelogPrompt(currentChangelog, changeDescription, language);
   
-  let text = await handleGeminiCallWithRetry(prompt, null, modelName) as string;
+  let text = await handleGeminiCallWithRetry(prompt, null, modelName, language) as string;
   
   if (text.startsWith('```markdown')) {
       text = text.substring('```markdown'.length);

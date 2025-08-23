@@ -1,12 +1,15 @@
+
 import React, { useState, useCallback, useRef } from 'react';
 import { UploadedFile } from '../types';
 import { UploadIcon } from './icons';
+import { useTranslation } from '../I18nContext';
 
 interface FileUploadProps {
   onFilesUploaded: (files: UploadedFile[]) => void;
 }
 
 const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
+  const { t } = useTranslation();
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -87,7 +90,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick() }}
       role="button"
       tabIndex={0}
-      aria-label="Upload files"
+      aria-label={t('uploadAria')}
     >
       <input
         ref={fileInputRef}
@@ -101,9 +104,9 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
       <div className="flex flex-col items-center justify-center space-y-2 text-gray-400 pointer-events-none">
         <UploadIcon />
         <div className="text-gray-300">
-          <span className="font-semibold text-indigo-400">Нажмите для загрузки</span> или перетащите
+          <span className="font-semibold text-indigo-400">{t('clickToUpload')}</span> {t('orDragAndDrop')}
         </div>
-        <div className="text-xs">Поддерживаются .gs, .js, .html, .json, .md</div>
+        <div className="text-xs">{t('supportedFiles')}</div>
       </div>
     </div>
   );
