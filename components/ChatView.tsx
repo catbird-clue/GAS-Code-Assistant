@@ -90,4 +90,4 @@ const ChatView: React.FC<ChatViewProps> = ({ conversationHistory, isAnswering })
   );
 };
 
-export default ChatView;
+export default React.memo(ChatView);

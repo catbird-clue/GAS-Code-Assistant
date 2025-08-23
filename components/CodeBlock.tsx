@@ -7,7 +7,7 @@ interface CodeBlockProps {
   language?: string;
 }
 
-const CodeBlock: React.FC<CodeBlockProps> = ({ children, language = 'javascript' }) => {
+const CodeBlock: React.FC<CodeBlockProps> = ({ children, language = 'plaintext' }) => {
     const [isCopied, setIsCopied] = useState(false);
 
     const handleCopy = () => {

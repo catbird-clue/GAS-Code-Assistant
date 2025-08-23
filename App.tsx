@@ -24,32 +24,43 @@ interface UndoState {
   analysisResult: Analysis | null;
 }
 
+interface AppState {
+  libraryFiles: UploadedFile[];
+  frontendFiles: UploadedFile[];
+  analysisResult: Analysis | null;
+}
+
 const MAX_UNDO_STACK_SIZE = 10;
 
-const getInitialUndoStack = (): UndoState[] => {
+const getInitialState = (): AppState => {
   try {
-    const storedStack = localStorage.getItem('undoStack');
-    if (storedStack) {
-      const parsedStack = JSON.parse(storedStack);
-      if (Array.isArray(parsedStack)) {
-        return parsedStack;
-      }
+    const savedState = localStorage.getItem('gasCodeAnalyzerState');
+    if (savedState) {
+      const parsed = JSON.parse(savedState);
+      return {
+        libraryFiles: parsed.libraryFiles || [],
+        frontendFiles: parsed.frontendFiles || [],
+        analysisResult: parsed.analysisResult || null,
+      };
     }
   } catch (e) {
-    console.error("Failed to load undo history:", e);
-    // If parsing fails, clear the corrupted item
-    localStorage.removeItem('undoStack');
+    console.error("Failed to load saved state:", e);
+    localStorage.removeItem('gasCodeAnalyzerState');
   }
-  return [];
+  return {
+    libraryFiles: [],
+    frontendFiles: [],
+    analysisResult: null,
+  };
 };
 
 
 export default function App(): React.ReactNode {
   const { language, setLanguage, t } = useTranslation();
-  const [libraryFiles, setLibraryFiles] = useState<UploadedFile[]>([]);
-  const [frontendFiles, setFrontendFiles] = useState<UploadedFile[]>([]);
+  const [libraryFiles, setLibraryFiles] = useState<UploadedFile[]>(getInitialState().libraryFiles);
+  const [frontendFiles, setFrontendFiles] = useState<UploadedFile[]>(getInitialState().frontendFiles);
 
-  const [analysisResult, setAnalysisResult] = useState<Analysis | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<Analysis | null>(getInitialState().analysisResult);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
@@ -68,7 +79,7 @@ export default function App(): React.ReactNode {
   const chatSessionRef = useRef<Chat | null>(null);
 
   const [autoReanalyze, setAutoReanalyze] = useState(false);
-  const [undoStack, setUndoStack] = useState<UndoState[]>(getInitialUndoStack);
+  const [undoStack, setUndoStack] = useState<UndoState[]>([]);
   
   const [selectedFixes, setSelectedFixes] = useState<Record<string, {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}>>({});
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
@@ -76,21 +87,27 @@ export default function App(): React.ReactNode {
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [modelName, setModelName] = useState<ModelName>('gemini-2.5-flash');
 
-  const updateUndoStack = (newStack: UndoState[]) => {
-    setUndoStack(newStack);
+  // Save state to localStorage on change
+  useEffect(() => {
     try {
-      localStorage.setItem('undoStack', JSON.stringify(newStack));
+      const stateToSave: AppState = {
+        libraryFiles,
+        frontendFiles,
+        analysisResult
+      };
+      localStorage.setItem('gasCodeAnalyzerState', JSON.stringify(stateToSave));
     } catch (e) {
-      console.error("Failed to save undo history:", e);
+      console.error("Failed to save state:", e);
     }
-  };
+  }, [libraryFiles, frontendFiles, analysisResult]);
+
 
   const pushToUndoStack = (state: UndoState) => {
     const newStack = [...undoStack, state];
     if (newStack.length > MAX_UNDO_STACK_SIZE) {
       newStack.shift();
     }
-    updateUndoStack(newStack);
+    setUndoStack(newStack);
   };
   
   const clearAnalysisAndChat = () => {
@@ -100,7 +117,7 @@ export default function App(): React.ReactNode {
     setAnalysisStats(null);
     setError(null);
     setNotification(null);
-    updateUndoStack([]);
+    setUndoStack([]);
     setSelectedFixes({});
   };
 
@@ -162,7 +179,7 @@ export default function App(): React.ReactNode {
     setConversationHistory([]);
     chatSessionRef.current = null;
     setActiveTab('analysis');
-    updateUndoStack([]);
+    setUndoStack([]);
 
     const startTime = new Date();
     const totalLines = [...libraryFiles, ...frontendFiles].reduce((acc, file) => acc + (file.content ? file.content.split('\n').length : 0), 0);
@@ -437,7 +454,7 @@ export default function App(): React.ReactNode {
               } catch (e) {
                   const errorMsg = t('selfCorrectionError', { message: e instanceof Error ? e.message : String(e) });
                   setError(errorMsg);
-                  updateUndoStack(undoStack.slice(0, -1));
+                  setUndoStack(undoStack.slice(0, -1));
                   setIsApplyingChanges(false);
                   return;
               }
@@ -445,7 +462,7 @@ export default function App(): React.ReactNode {
               const failedSnippetsText = snippetNotFoundFailures.map(f => `\n- In file '${f.change.fileName}'`).join('');
               const errorMsg = t('maxAttemptsError', { maxAttempts: MAX_ATTEMPTS, failedSnippets: failedSnippetsText});
               setError(errorMsg);
-              updateUndoStack(undoStack.slice(0, -1));
+              setUndoStack(undoStack.slice(0, -1));
               setIsApplyingChanges(false);
               return;
           }
@@ -500,7 +517,7 @@ export default function App(): React.ReactNode {
       const { failedChanges, newLibraryFiles: tempNewLibraryFiles, newFrontendFiles: tempNewFrontendFiles } = applyChangesToFiles(result.changes, libraryFiles, frontendFiles);
 
       if (failedChanges.length === result.changes.length && result.changes.length > 0) {
-          updateUndoStack(undoStack.slice(0, -1));
+          setUndoStack(undoStack.slice(0, -1));
           const failedFiles = Array.from(new Set(failedChanges.map(f => f.change.fileName))).join(', ');
           const errorMsg = t('batchApplyFailedError', { failedFiles: failedFiles });
           setError(errorMsg);
@@ -564,7 +581,7 @@ export default function App(): React.ReactNode {
             setLibraryFiles(lastState.libraryFiles);
             setFrontendFiles(lastState.frontendFiles);
             setAnalysisResult(lastState.analysisResult);
-            updateUndoStack(newStack);
+            setUndoStack(newStack);
             setNotification(t('undoNotification'));
             chatSessionRef.current = null; // Reset chat context
         }
@@ -695,7 +712,7 @@ function main() {
               </div>
             </div>
             {libraryFiles.length === 0 ? (
-              <FileUpload onFilesUploaded={handleLibraryFilesUploaded} />
+              <FileUpload onFilesUploaded={handleLibraryFilesUploaded} setError={setError} />
             ) : (
               <div className="flex flex-col gap-3">
                 <ul className="space-y-2 max-h-40 overflow-y-auto bg-gray-900/50 p-3 rounded-md">
@@ -746,7 +763,7 @@ function main() {
               </div>
             </div>
              {frontendFiles.length === 0 ? (
-              <FileUpload onFilesUploaded={handleFrontendFilesUploaded} />
+              <FileUpload onFilesUploaded={handleFrontendFilesUploaded} setError={setError} />
             ) : (
               <div className="flex flex-col gap-3">
                 <ul className="space-y-2 max-h-40 overflow-y-auto bg-gray-900/50 p-3 rounded-md">
@@ -911,6 +928,7 @@ function main() {
                         onToggleFixSelection={handleToggleFixSelection}
                         onApplySelectedFixes={handleApplySelectedFixes}
                         isApplyingChanges={isApplyingChanges}
+                        setSelectedFixes={setSelectedFixes}
                     />
                 ) : (
                     <ChatView

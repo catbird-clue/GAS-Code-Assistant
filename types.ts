@@ -15,6 +15,7 @@ export interface SuggestedFix {
 
 export interface Recommendation {
   description: string;
+  severity: 'low' | 'medium' | 'high';
   originalCodeSnippet: string | null;
   suggestions: SuggestedFix[];
   appliedSuggestionIndex?: number;

@@ -47,6 +47,7 @@ export const translations: Record<string, Record<string, string>> = {
     // Errors & Notifications
     errorTitle: "Error:",
     uploadFilesFirstError: "Please upload files first.",
+    fileTooLargeError: "File '{{fileName}}' is too large (max 1MB) and was not uploaded.",
     enterQuestionError: "Please enter your question.",
     analysisUnknownError: "An unknown error occurred during analysis.",
     questionUnknownError: "An unknown error occurred while processing the question.",
@@ -94,6 +95,13 @@ export const translations: Record<string, Record<string, string>> = {
     fixesSelected: "{{count}} fixes selected",
     applying: "Applying",
     applySelected: "Apply Selected",
+    severity: "Severity",
+    all: "All",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    selectAll: "Select all",
+    deselectAll: "Deselect all",
     // markdown report
     reportTitle_md: "Code Analysis Report",
     overallSummary_md: "Overall Summary",
@@ -182,6 +190,7 @@ export const translations: Record<string, Record<string, string>> = {
     // Errors & Notifications
     errorTitle: "Ошибка:",
     uploadFilesFirstError: "Пожалуйста, сначала загрузите файлы.",
+    fileTooLargeError: "Файл '{{fileName}}' слишком большой (макс. 1МБ) и не был загружен.",
     enterQuestionError: "Пожалуйста, введите ваш вопрос.",
     analysisUnknownError: "Произошла неизвестная ошибка при анализе.",
     questionUnknownError: "Произошла неизвестная ошибка при обработке вопроса.",
@@ -229,6 +238,13 @@ export const translations: Record<string, Record<string, string>> = {
     fixesSelected: "Выбрано исправлений: {{count}}",
     applying: "Применение",
     applySelected: "Применить выбранные",
+    severity: "Важность",
+    all: "Все",
+    low: "Низкая",
+    medium: "Средняя",
+    high: "Высокая",
+    selectAll: "Выбрать все",
+    deselectAll: "Снять выбор",
     // markdown report
     reportTitle_md: "Отчет по анализу кода",
     overallSummary_md: "Общий вывод",
