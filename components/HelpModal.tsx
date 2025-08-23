@@ -37,7 +37,7 @@ This tool is an intelligent assistant designed to analyze, refactor, and improve
 
 # Changelog
 
-## [1.3.0] - 2024-05-30
+## [1.3.0] - 2025-05-30
 ### Added
 - Implemented application state persistence in the browser's local storage to prevent data loss on page refresh.
 - Added severity filters (low, medium, high) to the analysis results pane.
@@ -48,12 +48,12 @@ This tool is an intelligent assistant designed to analyze, refactor, and improve
 - Improved performance by wrapping key components with \`React.memo\` to prevent unnecessary re-renders.
 - Improved code syntax highlighting by dynamically detecting the language from file extensions (.gs, .html, etc.).
 
-## [1.2.0] - 2024-05-29
+## [1.2.0] - 2025-05-29
 ### Added
 - Implemented a language switcher (EN/RU) for the entire UI.
 - All Gemini API prompts and outputs are now localized based on the selected language.
 
-## [1.1.0] - 2024-05-28
+## [1.1.0] - 2025-05-28
 ### Added
 - Gemini model selection (Flash/Pro) for analysis flexibility.
 - Export functionality for analysis reports and chat history in Markdown format.
@@ -61,7 +61,7 @@ This tool is an intelligent assistant designed to analyze, refactor, and improve
 - Improved the self-correction mechanism for refactoring to increase reliability.
 - Updated the design of the refactoring modal window.
 
-## [1.0.0] - 2024-05-27
+## [1.0.0] - 2025-05-27
 ### Added
 - Initial release of GAS Code Analyzer.
 - Features for analysis, refactoring, batch fix application, and chat.
@@ -96,7 +96,7 @@ const helpContentRu = `
 
 # Журнал изменений
 
-## [1.3.0] - 2024-05-30
+## [1.3.0] - 2025-05-30
 ### Добавлено
 - Реализовано сохранение состояния приложения в локальном хранилище браузера для предотвращения потери данных при обновлении страницы.
 - Добавлены фильтры по важности (низкая, средняя, высокая) в панель результатов анализа.
@@ -107,12 +107,12 @@ const helpContentRu = `
 - Улучшена производительность за счет использования \`React.memo\` для ключевых компонентов, чтобы предотвратить ненужные перерисовки.
 - Улучшена подсветка синтаксиса кода за счет динамического определения языка по расширению файла (.gs, .html и т.д.).
 
-## [1.2.0] - 2024-05-29
+## [1.2.0] - 2025-05-29
 ### Добавлено
 - Реализован переключатель языка (EN/RU) для всего интерфейса.
 - Все запросы и ответы от Gemini API теперь локализованы в соответствии с выбранным языком.
 
-## [1.1.0] - 2024-05-28
+## [1.1.0] - 2025-05-28
 ### Добавлено
 - Выбор модели Gemini (Flash/Pro) для гибкости анализа.
 - Экспорт отчета по анализу и истории чата в формате Markdown.
@@ -121,7 +121,7 @@ const helpContentRu = `
 - Улучшен механизм самокоррекции при применении рефакторинга для повышения надежности.
 - Обновлен дизайн модального окна для рефакторинга.
 
-## [1.0.0] - 2024-05-27
+## [1.0.0] - 2025-05-27
 ### Добавлено
 - Первоначальный выпуск GAS Code Analyzer.
 - Функции анализа, рефакторинга, пакетного применения исправлений и чата.
