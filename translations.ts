@@ -4,6 +4,7 @@ export const translations: Record<string, Record<string, string>> = {
     // Header
     appTitle: "GAS Code Analyzer",
     help: "Show help",
+    resetSession: "Reset Session",
 
     // File Upload Sections
     libraryProjectTitle: "1. Main Project (Library)",
@@ -35,6 +36,7 @@ export const translations: Record<string, Record<string, string>> = {
     ask: "Ask",
     answering: "Answering...",
     testResetWarning: "This action will reset the current files and analysis. Continue?",
+    resetSessionWarning: "Are you sure you want to clear all files and analysis data? This action cannot be undone.",
     autoReanalyze: "Automatically re-run analysis after applying fixes",
     geminiModel: "Gemini Model:",
     flashModel: "Flash (fast)",
@@ -67,6 +69,7 @@ export const translations: Record<string, Record<string, string>> = {
     changesAppliedNotification: "Changes applied successfully.",
     fixesAppliedNotification: "{{count}} fixes applied.",
     undoNotification: "The last change was undone.",
+    sessionResetNotification: "Session has been reset.",
 
     // Analysis Result Pane
     analysisInProgress: "Analyzing your code... This may take a few seconds.",
@@ -148,6 +151,7 @@ export const translations: Record<string, Record<string, string>> = {
     // Header
     appTitle: "GAS Code Analyzer",
     help: "Показать справку",
+    resetSession: "Сбросить сессию",
 
     // File Upload Sections
     libraryProjectTitle: "1. Основной проект (Библиотека)",
@@ -178,6 +182,7 @@ export const translations: Record<string, Record<string, string>> = {
     ask: "Вопрос",
     answering: "Отвечаю...",
     testResetWarning: "Это действие приведет к сбросу текущих файлов и анализа. Продолжить?",
+    resetSessionWarning: "Вы уверены, что хотите очистить все файлы и данные анализа? Это действие нельзя отменить.",
     autoReanalyze: "Автоматически запускать повторный анализ после применения исправлений",
     geminiModel: "Модель Gemini:",
     flashModel: "Flash (быстрая)",
@@ -210,6 +215,7 @@ export const translations: Record<string, Record<string, string>> = {
     changesAppliedNotification: "Изменения успешно применены.",
     fixesAppliedNotification: "{{count}} исправлений применено.",
     undoNotification: "Последнее изменение было отменено.",
+    sessionResetNotification: "Сессия сброшена.",
 
     // Analysis Result Pane
     analysisInProgress: "Идет анализ вашего кода... Это может занять несколько секунд.",
