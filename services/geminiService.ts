@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, Chat } from "@google/genai";
-import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation } from '../types';
+import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation, FailedChange, ModelName } from '../types';
 
 const API_KEY = process.env.API_KEY;
 
@@ -10,8 +10,6 @@ if (!API_KEY) {
 const ai = new GoogleGenAI({
   apiKey: API_KEY,
 });
-
-const model = 'gemini-2.5-flash';
 
 const createProjectSection = (title: string, files: UploadedFile[]): string => {
   if (files.length === 0) return "";
@@ -120,7 +118,10 @@ Analyze them with this relationship in mind.
 **Instructions:**
 1.  **Analyze Holistically:** Review all files to understand the project's overall purpose and architecture.
 2.  **File-by-File Analysis:** For each file in both the library and frontend projects, provide a list of actionable recommendations.
-3.  **Provide Actionable Suggestions:** For each recommendation involving code changes, you MUST extract the *original code snippet* from the user's file. The original code snippet must be a complete, self-contained block of code (e.g., a full for-loop including its body and closing brace, a full function definition). It must also be an exact, character-for-character match from the user's file, including all original indentation and whitespace. After extracting the snippet, provide one or more concrete \`suggestions\` in an array.
+3.  **Provide Actionable Suggestions:** For each recommendation involving code changes, you MUST extract the \`originalCodeSnippet\` from the user's file.
+    - **CRITICAL:** The \`originalCodeSnippet\` must be a complete, self-contained block of code (e.g., a full function definition from \`function\` to its closing \`}\`).
+    - **CRITICAL:** It must be an **exact, character-for-character copy** from the user's file. Do not change anything, including indentation, whitespace, or comments.
+    - **CRITICAL:** The \`originalCodeSnippet\` **MUST NOT** contain any of your suggested changes or new code. It is only for identifying the code to be replaced.
 4.  **Handle Multiple Solutions:** If a problem has multiple valid solutions (e.g., 'do A or do B'), list each one as a separate suggestion object in the \`suggestions\` array. Each suggestion must have a clear \`title\`, a \`description\` of the approach, and the corresponding \`correctedCodeSnippet\`. If there is only one solution, the \`suggestions\` array should still contain one object.
 5.  **Handle General Advice:** If a recommendation is general and doesn't apply to a specific block of code, the \`originalCodeSnippet\` field should be null, and the \`suggestions\` array should be empty.
 6.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
@@ -134,7 +135,7 @@ ${frontendSection}
 `;
 }
 
-async function handleGeminiCallWithRetry(prompt: string, schema: object | null, retries = 3) {
+async function handleGeminiCallWithRetry(prompt: string, schema: object | null, modelName: ModelName, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
       const config: any = {};
@@ -144,7 +145,7 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
       }
 
       const response = await ai.models.generateContent({
-        model: model,
+        model: modelName,
         contents: prompt,
         config: config,
       });
@@ -159,6 +160,9 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
       console.error(`Gemini API call attempt ${i + 1} failed:`, e);
       if (i === retries - 1) { // Last attempt
         if (e instanceof Error) {
+          if (e.message.includes('429')) { // HTTP 429: Too Many Requests / Rate Limit Exceeded
+            throw new Error(`Достигнут дневной лимит запросов к API Gemini (модель '${modelName}'). Пожалуйста, попробуйте снова завтра. Для снятия ограничений рассмотрите возможность перехода на тарифный план с оплатой по мере использования (Pay-as-you-go) в Google AI Studio.`);
+          }
           if (e.message.includes('Rpc failed')) {
             throw new Error("Не удалось подключиться к API Gemini. Это может быть связано с сетевыми ограничениями в вашей среде. Убедитесь, что у вас есть прямое подключение к generativelanguage.googleapis.com.");
           }
@@ -174,9 +178,9 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
 }
 
 
-export async function analyzeGasProject({ libraryFiles, frontendFiles }: { libraryFiles: UploadedFile[], frontendFiles: UploadedFile[] }): Promise<Analysis> {
+export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName }: { libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], modelName: ModelName }): Promise<Analysis> {
   const prompt = buildAnalysisPrompt({ libraryFiles, frontendFiles });
-  return handleGeminiCallWithRetry(prompt, analysisSchema);
+  return handleGeminiCallWithRetry(prompt, analysisSchema, modelName);
 }
 
 interface AskQuestionParams {
@@ -185,9 +189,10 @@ interface AskQuestionParams {
   question: string;
   chatSession?: Chat | null;
   analysis?: Analysis | null;
+  modelName: ModelName;
 }
 
-function buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis }: Omit<AskQuestionParams, 'chatSession'>): string {
+function buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis }: Omit<AskQuestionParams, 'chatSession' | 'modelName'>): string {
   const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
   const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
 
@@ -243,21 +248,26 @@ ${frontendSection}
 
 
 
-export async function askQuestionAboutCode({ libraryFiles, frontendFiles, question, chatSession, analysis }: AskQuestionParams): Promise<{ answer: string; chatSession: Chat }> {
+export async function askQuestionAboutCode({ libraryFiles, frontendFiles, question, chatSession, analysis, modelName }: AskQuestionParams): Promise<{ answer: string; chatSession: Chat }> {
   try {
     if (chatSession) {
       const response = await chatSession.sendMessage({ message: question });
       return { answer: response.text.trim(), chatSession };
     } else {
-      const chat = ai.chats.create({ model });
+      const chat = ai.chats.create({ model: modelName });
       const initialPrompt = buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis });
       const response = await chat.sendMessage({ message: initialPrompt });
       return { answer: response.text.trim(), chatSession: chat };
     }
   } catch (e) {
     console.error("Gemini API call for question failed:", e);
-    if (e instanceof Error && e.message.includes('Rpc failed')) {
-        throw new Error("Не удалось подключиться к API Gemini. Это может быть связано с сетевыми ограничениями в вашей среде. Убедитесь, что у вас есть прямое подключение к generativelanguage.googleapis.com.");
+    if (e instanceof Error) {
+        if (e.message.includes('429')) {
+             throw new Error(`Достигнут дневной лимит запросов к API Gemini (модель '${modelName}'). Пожалуйста, попробуйте снова завтра. Для снятия ограничений рассмотрите возможность перехода на тарифный план с оплатой по мере использования (Pay-as-you-go) в Google AI Studio.`);
+        }
+        if (e.message.includes('Rpc failed')) {
+            throw new Error("Не удалось подключиться к API Gemini. Это может быть связано с сетевыми ограничениями в вашей среде. Убедитесь, что у вас есть прямое подключение к generativelanguage.googleapis.com.");
+        }
     }
     throw new Error(`Произошла неизвестная ошибка при вызове API: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -269,6 +279,7 @@ interface RefactorCodeParams {
   fileName: string;
   libraryFiles: UploadedFile[];
   frontendFiles: UploadedFile[];
+  modelName: ModelName;
 }
 
 const refactorChangeSchema = {
@@ -319,7 +330,7 @@ const refactorSchema = {
 };
 
 
-export async function refactorCode({ code, instruction, fileName, libraryFiles, frontendFiles }: RefactorCodeParams): Promise<RefactorResult> {
+export async function refactorCode({ code, instruction, fileName, libraryFiles, frontendFiles, modelName }: RefactorCodeParams): Promise<RefactorResult> {
   const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
   const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
   
@@ -349,9 +360,12 @@ ${frontendSection}
 ---
 
 **Your Task & JSON Output:**
-1.  **Refactor the Main Snippet:** Create the corrected version of the code snippet. This is the 'mainChange'.
+1.  **Refactor the Main Snippet:** Create the corrected version of the code snippet for the 'mainChange'. The \`originalCodeSnippet\` for the main change should be the one provided to you above.
 2.  **Analyze Project-Wide Impact:** Based on the full context, identify ALL other files and code snippets that need to be updated as a direct consequence of the main change. These are the 'relatedChanges'.
-3.  **Provide Snippets for All Changes:** For every main and related change, you MUST provide the \`originalCodeSnippet\` to be replaced and the new, \`correctedCodeSnippet\`. The \`originalCodeSnippet\` MUST be a complete, self-contained block of code and an *exact, verbatim, character-for-character match* of the code from the source file, including all whitespace, indentation, and comments. This is critical for the replacement logic to work.
+3.  **Provide Snippets for All Changes:** For every main and related change, you MUST provide the \`originalCodeSnippet\` to be replaced and the new, \`correctedCodeSnippet\`.
+    - **CRITICAL:** The \`originalCodeSnippet\` for every change MUST be a complete, self-contained block of code.
+    - **CRITICAL:** It MUST be an **exact, verbatim, character-for-character copy** of the code from the source file, including all whitespace, indentation, and comments.
+    - **CRITICAL:** This is the most common point of failure. Do not hallucinate or modify the \`originalCodeSnippet\` in any way. It must be a direct copy from the files provided in the context. This is critical for the replacement logic to work.
 4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
 5.  **Identify Manual Follow-up Actions:** Critically, determine if the automated code change requires the user to perform any manual actions *outside* of the code editor to make the application functional. Examples include:
     *   Setting a Script Property in the GAS project settings.
@@ -361,8 +375,56 @@ ${frontendSection}
 6.  **Populate 'manualSteps':** If any such actions are required, populate the \`manualSteps\` array with clear, step-by-step instructions. If no manual steps are needed, this array MUST be empty.
 `;
 
-  return handleGeminiCallWithRetry(prompt, refactorSchema);
+  return handleGeminiCallWithRetry(prompt, refactorSchema, modelName);
 }
+
+interface CorrectRefactorParams {
+  originalResult: RefactorResult;
+  failedChanges: FailedChange[];
+  libraryFiles: UploadedFile[];
+  frontendFiles: UploadedFile[];
+  instruction: string;
+  modelName: ModelName;
+}
+
+export async function correctRefactorResult({ failedChanges, libraryFiles, frontendFiles, instruction, modelName }: CorrectRefactorParams): Promise<RefactorResult> {
+  const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
+  const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
+
+  const failedSnippetsText = failedChanges
+    .map(f => `- В файле \`${f.change.fileName}\`, не удалось найти следующий фрагмент:\n\`\`\`\n${f.change.originalCodeSnippet}\n\`\`\``)
+    .join('\n');
+
+  const prompt = `
+You are a self-correcting AI assistant for Google Apps Script. Your previous attempt to refactor code failed because you provided incorrect \`originalCodeSnippet\` values that were not found in the source files. Your task is to try again and fix your mistake. You MUST respond exclusively in Russian.
+
+**Original Refactoring Goal:**
+${instruction}
+
+---
+
+**Your Previous Incorrect Snippets:**
+You made mistakes in the following snippets. The user's code does not contain them exactly as you wrote them.
+${failedSnippetsText}
+
+---
+
+**Full Project Context (The user's current code):**
+${librarySection}
+${frontendSection}
+
+---
+
+**CRITICAL INSTRUCTIONS FOR YOUR SECOND ATTEMPT:**
+1.  **Re-analyze the Goal:** Carefully re-read the original refactoring goal.
+2.  **Generate a New Plan:** Create a new, complete refactoring plan. Do not just fix the broken parts; regenerate the entire plan to ensure consistency.
+3.  **FIX THE SNIPPETS:** The most important task is to fix your previous mistake. For every \`originalCodeSnippet\` in your new plan, it **MUST** be a perfect, verbatim, character-for-character copy from the project files provided above. Check indentation, comments, and whitespace. This is the only way the automated tool can apply your changes.
+4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
+`;
+
+  return handleGeminiCallWithRetry(prompt, refactorSchema, modelName);
+}
+
 
 const batchRefactorSchema = {
     type: Type.OBJECT,
@@ -382,7 +444,7 @@ const batchRefactorSchema = {
 };
 
 
-export async function batchRefactorCode({ instructions, libraryFiles, frontendFiles }: { instructions: BatchInstruction[], libraryFiles: UploadedFile[], frontendFiles: UploadedFile[] }): Promise<BatchRefactorResult> {
+export async function batchRefactorCode({ instructions, libraryFiles, frontendFiles, modelName }: { instructions: BatchInstruction[], libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], modelName: ModelName }): Promise<BatchRefactorResult> {
   const librarySection = createProjectSection("Основной проект (Библиотека)", libraryFiles);
   const frontendSection = createProjectSection("Фронтенд-проект (Использует библиотеку)", frontendFiles);
 
@@ -415,12 +477,15 @@ ${instructionsText}
 
 **Your Task & JSON Output:**
 1.  **Consolidate All Changes:** Analyze all tasks and their project-wide impact. Generate a single, flat list of all unique code changes required. Each change object in the 'changes' array must contain the file name, a description, the exact original code snippet, and the corrected code snippet.
-2.  **Ensure Exact Snippets:** The \`originalCodeSnippet\` for each change MUST be a complete, self-contained block of code and an exact, verbatim match from the source files. This is critical.
+2.  **Ensure Exact Snippets:** For each change, the \`originalCodeSnippet\` is the most critical part.
+    - **CRITICAL:** It MUST be a complete, self-contained block of code.
+    - **CRITICAL:** It MUST be an **exact, verbatim, character-for-character copy** from the source files. Do not change indentation, whitespace, or comments.
+    - **CRITICAL:** You must not invent or modify the \`originalCodeSnippet\`. It is only used to find and replace code. An incorrect snippet will cause the entire process to fail.
 3.  **Consolidate Manual Steps:** Review all changes and create a consolidated, de-duplicated list of any manual follow-up actions required.
 4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
 `;
 
-  return handleGeminiCallWithRetry(prompt, batchRefactorSchema);
+  return handleGeminiCallWithRetry(prompt, batchRefactorSchema, modelName);
 }
 
 
@@ -455,10 +520,10 @@ ${currentChangelog}
 Now, provide the full updated CHANGELOG.md content.`;
 }
 
-export async function updateChangelog({ currentChangelog, changeDescription, language = 'ru' }: { currentChangelog: string, changeDescription: string, language: string }): Promise<string> {
+export async function updateChangelog({ currentChangelog, changeDescription, language = 'ru', modelName }: { currentChangelog: string, changeDescription: string, language: string, modelName: ModelName }): Promise<string> {
   const prompt = buildChangelogPrompt(currentChangelog, changeDescription, language);
   
-  let text = await handleGeminiCallWithRetry(prompt, null) as string;
+  let text = await handleGeminiCallWithRetry(prompt, null, modelName) as string;
   
   if (text.startsWith('```markdown')) {
       text = text.substring('```markdown'.length);

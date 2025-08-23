@@ -1,4 +1,6 @@
 
+export type ModelName = 'gemini-2.5-flash' | 'gemini-2.5-pro';
+
 export interface UploadedFile {
   name: string;
   content: string;
@@ -71,4 +73,9 @@ export interface BatchInstruction {
 export interface BatchRefactorResult {
   changes: RefactorChange[];
   manualSteps: ManualStep[];
+}
+
+export interface FailedChange {
+  change: RefactorChange;
+  reason: 'SNIPPET_NOT_FOUND';
 }

@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult } from './types';
+import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult, FailedChange, ModelName } from './types';
 import FileUpload from './components/FileUpload';
 import AnalysisResult from './components/AnalysisResult';
 import ChatView from './components/ChatView';
-import { analyzeGasProject, refactorCode, updateChangelog, askQuestionAboutCode, batchRefactorCode } from './services/geminiService';
+import { analyzeGasProject, refactorCode, updateChangelog, askQuestionAboutCode, batchRefactorCode, correctRefactorResult } from './services/geminiService';
 import { GithubIcon, FileCodeIcon, WandIcon, DownloadIcon, XIcon, BeakerIcon, HelpIcon } from './components/icons';
 import RefactorResultModal from './components/RefactorResultModal';
 import { Chat } from '@google/genai';
@@ -56,6 +56,7 @@ export default function App(): React.ReactNode {
   const [isRefactoring, setIsRefactoring] = useState(false);
   const [isApplyingChanges, setIsApplyingChanges] = useState<boolean>(false);
   const [refactoringRecommendation, setRefactoringRecommendation] = useState<{fileName: string, recIndex: number, suggestionIndex: number} | null>(null);
+  const [currentInstruction, setCurrentInstruction] = useState<string | null>(null);
   
   const [userQuestion, setUserQuestion] = useState<string>('');
   const [conversationHistory, setConversationHistory] = useState<ConversationTurn[]>([]);
@@ -70,6 +71,7 @@ export default function App(): React.ReactNode {
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
   const [isTestRunPending, setIsTestRunPending] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [modelName, setModelName] = useState<ModelName>('gemini-2.5-flash');
 
   const updateUndoStack = (newStack: UndoState[]) => {
     setUndoStack(newStack);
@@ -163,7 +165,7 @@ export default function App(): React.ReactNode {
     const totalLines = [...libraryFiles, ...frontendFiles].reduce((acc, file) => acc + (file.content ? file.content.split('\n').length : 0), 0);
 
     try {
-      const result = await analyzeGasProject({ libraryFiles, frontendFiles });
+      const result = await analyzeGasProject({ libraryFiles, frontendFiles, modelName });
       setAnalysisResult(result);
       
       const endTime = new Date();
@@ -184,7 +186,7 @@ export default function App(): React.ReactNode {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [libraryFiles, frontendFiles]);
+  }, [libraryFiles, frontendFiles, modelName]);
 
    const handleAskQuestion = useCallback(async () => {
     if (!userQuestion.trim()) {
@@ -208,6 +210,7 @@ export default function App(): React.ReactNode {
         question: userQuestion,
         chatSession: chatSessionRef.current,
         analysis: analysisResult,
+        modelName,
       });
       setConversationHistory(prev => [...prev, { question: userQuestion, answer }]);
       chatSessionRef.current = newChatSession;
@@ -218,7 +221,7 @@ export default function App(): React.ReactNode {
     } finally {
       setIsAnswering(false);
     }
-  }, [libraryFiles, frontendFiles, userQuestion, analysisResult]);
+  }, [libraryFiles, frontendFiles, userQuestion, analysisResult, modelName]);
 
 
   const handleApplyFix = useCallback(async ({ fileName, recommendation, recIndex, suggestionIndex }: { fileName: string; recommendation: Recommendation, recIndex: number, suggestionIndex: number }) => {
@@ -232,14 +235,16 @@ export default function App(): React.ReactNode {
     setNotification(null);
     setError(null);
 
+    const instruction = `${recommendation.description}\n\nКонкретное предложение: ${suggestion.title} - ${suggestion.description}`;
+    setCurrentInstruction(instruction); 
     try {
-       const instruction = `${recommendation.description}\n\nКонкретное предложение: ${suggestion.title} - ${suggestion.description}`;
        const result = await refactorCode({
         code: recommendation.originalCodeSnippet,
         instruction: instruction,
         fileName,
         libraryFiles,
         frontendFiles,
+        modelName,
       });
       setCurrentRefactor(result);
     } catch (e) {
@@ -253,12 +258,14 @@ export default function App(): React.ReactNode {
     } finally {
       setIsRefactoring(false);
     }
-  }, [libraryFiles, frontendFiles]);
+  }, [libraryFiles, frontendFiles, modelName]);
 
-  const applyChangesToFiles = (allChanges: RefactorChange[], currentLibraryFiles: UploadedFile[], currentFrontendFiles: UploadedFile[]) => {
+  const applyChangesToFiles = (allChanges: RefactorChange[], currentLibraryFiles: UploadedFile[], currentFrontendFiles: UploadedFile[]): { newLibraryFiles: UploadedFile[], newFrontendFiles: UploadedFile[], failedChanges: FailedChange[] } => {
     const newLibraryFiles: UploadedFile[] = JSON.parse(JSON.stringify(currentLibraryFiles));
     const newFrontendFiles: UploadedFile[] = JSON.parse(JSON.stringify(currentFrontendFiles));
-    
+    const failedChanges: FailedChange[] = [];
+    const successfullyAppliedChanges: RefactorChange[] = [];
+
     const changesByFile = new Map<string, RefactorChange[]>();
     allChanges.forEach(change => {
         if (!changesByFile.has(change.fileName)) {
@@ -267,149 +274,173 @@ export default function App(): React.ReactNode {
         changesByFile.get(change.fileName)!.push(change);
     });
 
-    let totalAppliedCount = 0;
-    const failedFiles = new Set<string>();
-
     for (const [fileName, changes] of changesByFile.entries()) {
         const fileToUpdate = newLibraryFiles.find(f => f.name === fileName) || newFrontendFiles.find(f => f.name === fileName);
-
         if (!fileToUpdate) {
-            console.error(`File ${fileName} not found for applying changes.`);
-            failedFiles.add(fileName);
+            console.error(`File ${fileName} not found.`);
+            changes.forEach(c => failedChanges.push({ change: c, reason: 'SNIPPET_NOT_FOUND' }));
             continue;
         }
 
         let currentContent = fileToUpdate.content;
         
-        let patches: Patch[] = changes
-            .map(change => {
-                if (!change.originalCodeSnippet) return null;
-                const index = currentContent.indexOf(change.originalCodeSnippet);
-                if (index === -1) {
-                    console.warn(`Original code snippet not found in ${fileName}.`, { snippet: change.originalCodeSnippet });
-                    failedFiles.add(fileName);
-                    return null;
-                }
-                return { index, originalLength: change.originalCodeSnippet.length, change };
-            })
-            .filter((p): p is Patch => p !== null);
+        const patches: Patch[] = changes.map(change => {
+            if (!change.originalCodeSnippet) {
+                return null;
+            }
+            const index = currentContent.indexOf(change.originalCodeSnippet);
+            if (index === -1) {
+                console.warn(`Original code snippet not found in ${fileName}.`, { snippet: change.originalCodeSnippet });
+                failedChanges.push({ change, reason: 'SNIPPET_NOT_FOUND' });
+                return null;
+            }
+            return { index, originalLength: change.originalCodeSnippet.length, change };
+        }).filter((p): p is Patch => p !== null);
 
-        patches.sort((a, b) => a.index - b.index); 
-        
-        let i = 0;
-        while (i < patches.length - 1) {
-            const currentPatch = patches[i];
-            const nextPatch = patches[i+1];
-            const currentEnd = currentPatch.index + currentPatch.originalLength;
-            if (currentEnd > nextPatch.index) {
-                console.warn("Overlapping patch detected. Discarding the latter patch.");
-                patches.splice(i + 1, 1);
+        patches.sort((a, b) => a.index - b.index);
+
+        for (let i = 0; i < patches.length - 1; ) {
+            const currentEnd = patches[i].index + patches[i].originalLength;
+            if (currentEnd > patches[i+1].index) {
+                console.warn('Overlapping patch detected, discarding the latter.');
+                const removed = patches.splice(i + 1, 1);
+                failedChanges.push({ change: removed[0].change, reason: 'SNIPPET_NOT_FOUND' });
             } else {
                 i++;
             }
         }
-
+        
         patches.sort((a, b) => b.index - a.index);
 
         for (const patch of patches) {
-            const { index, originalLength, change } = patch;
-            currentContent = 
-                currentContent.substring(0, index) + 
-                change.correctedCodeSnippet + 
-                currentContent.substring(index + originalLength);
-            totalAppliedCount++;
+            currentContent = currentContent.substring(0, patch.index) + patch.change.correctedCodeSnippet + currentContent.substring(patch.index + patch.originalLength);
+            successfullyAppliedChanges.push(patch.change);
         }
 
         fileToUpdate.content = currentContent;
     }
-    
-    const changedFileNames = new Set(allChanges.map(c => c.fileName).filter(name => !failedFiles.has(name)));
-    
+
+    const changedFileNames = new Set(successfullyAppliedChanges.map(c => c.fileName));
     newLibraryFiles.forEach(file => { if (changedFileNames.has(file.name)) file.changesCount = (file.changesCount || 0) + 1; });
     newFrontendFiles.forEach(file => { if (changedFileNames.has(file.name)) file.changesCount = (file.changesCount || 0) + 1; });
     
-    return { success: totalAppliedCount > 0 || allChanges.length === 0, newLibraryFiles, newFrontendFiles, failedFiles };
+    return { newLibraryFiles, newFrontendFiles, failedChanges };
   };
 
   const handleConfirmRefactor = async (result: RefactorResult) => {
-    setIsApplyingChanges(true);
-    setError(null);
+      setIsApplyingChanges(true);
+      setError(null);
+      setNotification(null);
 
-    if (!analysisResult || !refactoringRecommendation) {
-        setError("Не удалось применить исправление: отсутствует контекст анализа. Пожалуйста, попробуйте снова.");
-        setIsApplyingChanges(false);
-        setIsRefactorModalOpen(false);
-        return;
-    }
+      if (!analysisResult || !refactoringRecommendation || !currentInstruction) {
+          setError("Не удалось применить исправление: отсутствует контекст. Попробуйте снова.");
+          setIsApplyingChanges(false);
+          setIsRefactorModalOpen(false);
+          return;
+      }
+      
+      const fileAnalysis = analysisResult.libraryProject.find(f => f.fileName === refactoringRecommendation.fileName) 
+                        || analysisResult.frontendProject.find(f => f.fileName === refactoringRecommendation.fileName);
 
-    const fileAnalysis = analysisResult.libraryProject.find(f => f.fileName === refactoringRecommendation.fileName) 
-                       || analysisResult.frontendProject.find(f => f.fileName === refactoringRecommendation.fileName);
+      if (!fileAnalysis || !fileAnalysis.recommendations[refactoringRecommendation.recIndex]?.originalCodeSnippet) {
+          setError(`Не удалось найти исходную рекомендацию для исправления в ${refactoringRecommendation.fileName}.`);
+          setIsApplyingChanges(false);
+          return;
+      }
 
-    if (!fileAnalysis || !fileAnalysis.recommendations[refactoringRecommendation.recIndex]?.originalCodeSnippet) {
-        setError(`Не удалось найти исходную рекомендацию для исправления в ${refactoringRecommendation.fileName}.`);
-        setIsApplyingChanges(false);
-        return;
-    }
-    
-    pushToUndoStack({
-      libraryFiles: JSON.parse(JSON.stringify(libraryFiles)),
-      frontendFiles: JSON.parse(JSON.stringify(frontendFiles)),
-      analysisResult: JSON.parse(JSON.stringify(analysisResult))
-    });
+      pushToUndoStack({
+          libraryFiles: JSON.parse(JSON.stringify(libraryFiles)),
+          frontendFiles: JSON.parse(JSON.stringify(frontendFiles)),
+          analysisResult: JSON.parse(JSON.stringify(analysisResult))
+      });
 
-    const originalRecommendation = fileAnalysis.recommendations[refactoringRecommendation.recIndex];
-    
-    const mainChange = {
-        ...result.mainChange,
-        originalCodeSnippet: originalRecommendation.originalCodeSnippet,
-    };
+      let lastResult = result;
+      const MAX_ATTEMPTS = 2;
 
-    const allChanges = [mainChange, ...result.relatedChanges];
-    const { success, newLibraryFiles, newFrontendFiles, failedFiles } = applyChangesToFiles(allChanges, libraryFiles, frontendFiles);
-    
-    if (!success) {
-        updateUndoStack(undoStack.slice(0, -1));
-        const errorMsg = `Ошибка: Ни одно из предложенных изменений не удалось применить. Оригинальный код для замены не был найден в файлах: ${Array.from(failedFiles).join(', ')}`;
-        setError(errorMsg);
-        setIsApplyingChanges(false);
-        return;
-    }
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          let allChanges;
+          if (attempt === 1) {
+              const originalRecommendation = fileAnalysis.recommendations[refactoringRecommendation.recIndex];
+              const mainChange = {
+                  ...lastResult.mainChange,
+                  originalCodeSnippet: originalRecommendation.originalCodeSnippet!,
+              };
+              allChanges = [mainChange, ...lastResult.relatedChanges];
+          } else {
+              allChanges = [lastResult.mainChange, ...lastResult.relatedChanges];
+          }
+          
+          const { newLibraryFiles, newFrontendFiles, failedChanges } = applyChangesToFiles(allChanges, libraryFiles, frontendFiles);
+          
+          const snippetNotFoundFailures = failedChanges.filter(f => f.reason === 'SNIPPET_NOT_FOUND');
 
-    if (refactoringRecommendation) {
-        const changelogFile = newLibraryFiles.find(f => f.name.toLowerCase() === 'changelog.md') || newFrontendFiles.find(f => f.name.toLowerCase() === 'changelog.md');
-        if (changelogFile) {
-            try {
-                const changeDescription = `В файле \`${refactoringRecommendation.fileName}\`: ${fileAnalysis.recommendations[refactoringRecommendation.recIndex].suggestions[refactoringRecommendation.suggestionIndex].title}.`;
-                changelogFile.content = await updateChangelog({ currentChangelog: changelogFile.content, changeDescription, language: changelogLang });
-                changelogFile.changesCount = (changelogFile.changesCount || 0) + 1;
-            } catch (e) {
-                console.error("Failed to update changelog:", e);
-                setError((prevError) => `${prevError || ''}\nНе удалось обновить CHANGELOG.`);
-            }
-        }
-    }
-    
-    setLibraryFiles(newLibraryFiles);
-    setFrontendFiles(newFrontendFiles);
-    
-    const newAnalysisResult = JSON.parse(JSON.stringify(analysisResult));
-    const fileInAnalysis = newAnalysisResult.libraryProject.find((f: FileAnalysis) => f.fileName === refactoringRecommendation.fileName) 
-                      || newAnalysisResult.frontendProject.find((f: FileAnalysis) => f.fileName === refactoringRecommendation.fileName);
-    if (fileInAnalysis) {
-        fileInAnalysis.recommendations[refactoringRecommendation.recIndex].appliedSuggestionIndex = refactoringRecommendation.suggestionIndex;
-    }
-    setAnalysisResult(newAnalysisResult);
-    
-    setNotification(`Изменения применены. Анализ может быть неактуальным.`);
-    chatSessionRef.current = null;
-    setIsApplyingChanges(false);
-    setIsRefactorModalOpen(false);
-    setCurrentRefactor(null);
-    setRefactoringRecommendation(null);
-    
-    if (autoReanalyze) {
-        handleAnalyze();
-    }
+          if (snippetNotFoundFailures.length === 0) {
+              // SUCCESS
+              const changelogFile = newLibraryFiles.find(f => f.name.toLowerCase() === 'changelog.md') || newFrontendFiles.find(f => f.name.toLowerCase() === 'changelog.md');
+              if (changelogFile) {
+                  try {
+                      const changeDescription = `В файле \`${refactoringRecommendation.fileName}\`: ${fileAnalysis.recommendations[refactoringRecommendation.recIndex].suggestions[refactoringRecommendation.suggestionIndex].title}.`;
+                      changelogFile.content = await updateChangelog({ currentChangelog: changelogFile.content, changeDescription, language: changelogLang, modelName });
+                      changelogFile.changesCount = (changelogFile.changesCount || 0) + 1;
+                  } catch (e) {
+                      console.error("Failed to update changelog:", e);
+                      setError((prevError) => `${prevError || ''}\nНе удалось обновить CHANGELOG.`);
+                  }
+              }
+              
+              setLibraryFiles(newLibraryFiles);
+              setFrontendFiles(newFrontendFiles);
+              
+              const newAnalysisResult = JSON.parse(JSON.stringify(analysisResult));
+              const fileInAnalysis = newAnalysisResult.libraryProject.find((f: FileAnalysis) => f.fileName === refactoringRecommendation.fileName) || newAnalysisResult.frontendProject.find((f: FileAnalysis) => f.fileName === refactoringRecommendation.fileName);
+              if (fileInAnalysis) {
+                  fileInAnalysis.recommendations[refactoringRecommendation.recIndex].appliedSuggestionIndex = refactoringRecommendation.suggestionIndex;
+              }
+              setAnalysisResult(newAnalysisResult);
+              
+              setNotification(`Изменения успешно применены.`);
+              chatSessionRef.current = null;
+              setIsApplyingChanges(false);
+              setIsRefactorModalOpen(false);
+              setCurrentRefactor(null);
+              setRefactoringRecommendation(null);
+              
+              if (autoReanalyze) {
+                  handleAnalyze();
+              }
+
+              return; 
+          }
+
+          if (attempt < MAX_ATTEMPTS) {
+              setNotification(`Не удалось найти исходный код. Попытка №${attempt + 1}: самокоррекция...`);
+              try {
+                  const correctedResult = await correctRefactorResult({
+                      originalResult: lastResult,
+                      failedChanges: snippetNotFoundFailures,
+                      libraryFiles: libraryFiles,
+                      frontendFiles: frontendFiles,
+                      instruction: currentInstruction,
+                      modelName,
+                  });
+                  lastResult = correctedResult;
+                  setCurrentRefactor(correctedResult);
+              } catch (e) {
+                  const errorMsg = `Ошибка во время самокоррекции: ${e instanceof Error ? e.message : String(e)}`;
+                  setError(errorMsg);
+                  updateUndoStack(undoStack.slice(0, -1));
+                  setIsApplyingChanges(false);
+                  return;
+              }
+          } else {
+              const failedSnippetsText = snippetNotFoundFailures.map(f => `\n- В файле '${f.change.fileName}'`).join('');
+              const errorMsg = `Ошибка: Не удалось применить изменения после ${MAX_ATTEMPTS} попыток. Модель не смогла найти правильный исходный код для замены в следующих файлах:${failedSnippetsText}`;
+              setError(errorMsg);
+              updateUndoStack(undoStack.slice(0, -1));
+              setIsApplyingChanges(false);
+              return;
+          }
+      }
   };
 
   const handleToggleFixSelection = (key: string, fixDetails: {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}) => {
@@ -446,6 +477,7 @@ export default function App(): React.ReactNode {
         instructions,
         libraryFiles,
         frontendFiles,
+        modelName,
       });
 
       pushToUndoStack({
@@ -454,11 +486,13 @@ export default function App(): React.ReactNode {
         analysisResult: JSON.parse(JSON.stringify(analysisResult))
       });
 
-      const { success, newLibraryFiles: tempNewLibraryFiles, newFrontendFiles: tempNewFrontendFiles, failedFiles } = applyChangesToFiles(result.changes, libraryFiles, frontendFiles);
+      // Note: Self-correction is not yet implemented for batch refactoring
+      const { failedChanges, newLibraryFiles: tempNewLibraryFiles, newFrontendFiles: tempNewFrontendFiles } = applyChangesToFiles(result.changes, libraryFiles, frontendFiles);
 
-      if (!success) {
+      if (failedChanges.length === result.changes.length && result.changes.length > 0) {
           updateUndoStack(undoStack.slice(0, -1));
-          const errorMsg = `Ошибка: Ни одно из предложенных изменений не удалось применить. Оригинальный код для замены не был найден в файлах: ${Array.from(failedFiles).join(', ')}`;
+          const failedFiles = Array.from(new Set(failedChanges.map(f => f.change.fileName))).join(', ');
+          const errorMsg = `Ошибка: Ни одно из предложенных изменений не удалось применить. Оригинальный код для замены не был найден в файлах: ${failedFiles}`;
           setError(errorMsg);
           setIsApplyingChanges(false);
           return;
@@ -471,7 +505,7 @@ export default function App(): React.ReactNode {
         for (const fix of fixesToApply) {
           try {
             const changeDescription = `В файле \`${fix.fileName}\`: ${fix.rec.suggestions[fix.suggestionIndex].title}.`;
-            currentChangelogContent = await updateChangelog({ currentChangelog: currentChangelogContent, changeDescription, language: changelogLang });
+            currentChangelogContent = await updateChangelog({ currentChangelog: currentChangelogContent, changeDescription, language: changelogLang, modelName });
             changesApplied++;
           } catch(e) {
             console.error("Failed to update changelog for a fix:", e);
@@ -796,17 +830,31 @@ function main() {
                           />
                           Автоматически запускать повторный анализ после применения исправлений
                       </label>
-                      <div className="flex items-center gap-2 text-sm text-gray-400">
-                          <label htmlFor="changelog-lang">Язык CHANGELOG:</label>
-                          <select 
-                            id="changelog-lang"
-                            value={changelogLang}
-                            onChange={(e) => setChangelogLang(e.target.value)}
-                            className="bg-gray-700 border-gray-600 rounded text-white text-xs p-1 focus:ring-indigo-500 focus:border-indigo-500"
-                          >
-                            <option value="ru">Русский</option>
-                            <option value="en">English</option>
-                          </select>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="flex items-center gap-2 text-sm text-gray-400">
+                            <label htmlFor="changelog-lang">Язык CHANGELOG:</label>
+                            <select 
+                              id="changelog-lang"
+                              value={changelogLang}
+                              onChange={(e) => setChangelogLang(e.target.value)}
+                              className="w-full bg-gray-700 border-gray-600 rounded text-white text-xs p-1 focus:ring-indigo-500 focus:border-indigo-500"
+                            >
+                              <option value="ru">Русский</option>
+                              <option value="en">English</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-gray-400">
+                            <label htmlFor="model-name">Модель Gemini:</label>
+                            <select 
+                              id="model-name"
+                              value={modelName}
+                              onChange={(e) => setModelName(e.target.value as ModelName)}
+                              className="w-full bg-gray-700 border-gray-600 rounded text-white text-xs p-1 focus:ring-indigo-500 focus:border-indigo-500"
+                            >
+                              <option value="gemini-2.5-flash">Flash (быстрая)</option>
+                              <option value="gemini-2.5-pro">Pro (мощная)</option>
+                            </select>
+                        </div>
                       </div>
                   </div>
               </div>
