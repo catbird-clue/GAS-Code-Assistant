@@ -113,6 +113,38 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
             </div>
           ) : result ? (
             <div>
+              {result.manualSteps && result.manualSteps.length > 0 && (
+                <div className="mb-8">
+                  <h3 className="text-xl font-bold mb-3 text-yellow-300 flex items-center gap-2">
+                    <AlertTriangleIcon />
+                    {t('manualStepsTitle')}
+                  </h3>
+                  <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                      <div className="text-yellow-200 text-sm max-w-prose">
+                        {t('manualStepsDescription')}
+                      </div>
+                      <button 
+                        onClick={handleDownloadMemo}
+                        className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-md text-sm transition-colors flex-shrink-0"
+                      >
+                        <DownloadIcon />
+                        {t('downloadMemo')}
+                      </button>
+                    </div>
+                    <ul className="space-y-3">
+                      {result.manualSteps.map((step, index) => (
+                        <li key={index} className="bg-gray-900/50 p-3 rounded-md border border-gray-700">
+                          <div className="font-semibold text-gray-200">{step.title}</div>
+                          {step.fileName && <div className="text-xs text-gray-500 mt-1">{t('file')}: <code className="bg-gray-700 px-1 py-0.5 rounded">{step.fileName}</code></div>}
+                          <div className="text-sm text-gray-400 mt-1" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(step.description || '') as string) }} />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
               <div className="mb-6">
                 <h3 className="text-xl font-bold mt-2 mb-3 text-indigo-300">{t('mainChange')}</h3>
                 <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700">
@@ -159,39 +191,6 @@ const RefactorResultModal: React.FC<RefactorResultModalProps> = ({ isOpen, onClo
                   <div className="text-gray-400">{t('noRelatedChanges')}</div>
                 )}
               </div>
-              
-              {result.manualSteps && result.manualSteps.length > 0 && (
-                <div className="mt-8">
-                  <h3 className="text-xl font-bold mb-3 text-yellow-300 flex items-center gap-2">
-                    <AlertTriangleIcon />
-                    {t('manualStepsTitle')}
-                  </h3>
-                  <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg p-4">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-                      <div className="text-yellow-200 text-sm max-w-prose">
-                        {t('manualStepsDescription')}
-                      </div>
-                      <button 
-                        onClick={handleDownloadMemo}
-                        className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white font-semibold px-3 py-2 rounded-md text-sm transition-colors flex-shrink-0"
-                      >
-                        <DownloadIcon />
-                        {t('downloadMemo')}
-                      </button>
-                    </div>
-                    <ul className="space-y-3">
-                      {result.manualSteps.map((step, index) => (
-                        <li key={index} className="bg-gray-900/50 p-3 rounded-md border border-gray-700">
-                          <div className="font-semibold text-gray-200">{step.title}</div>
-                          {step.fileName && <div className="text-xs text-gray-500 mt-1">{t('file')}: <code className="bg-gray-700 px-1 py-0.5 rounded">{step.fileName}</code></div>}
-                          <div className="text-sm text-gray-400 mt-1" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(step.description || '') as string) }} />
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
-
             </div>
           ) : null}
         </main>

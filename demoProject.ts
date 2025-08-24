@@ -37,6 +37,34 @@ function findMatchingData() {
 }`,
   },
   {
+    name: 'Config.gs',
+    content: `// A hardcoded configuration value.
+const SPREADSHEET_ID = "YOUR_SPREADSHEET_ID_HERE";
+
+/**
+ * Gets the configured spreadsheet by its hardcoded ID.
+ * @returns {GoogleAppsScript.Spreadsheet.Spreadsheet} The spreadsheet object.
+ */
+function getSpreadsheet() {
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
+}`
+  },
+  {
+    name: 'CHANGELOG.md',
+    content: `# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [1.0.0] - 2025-05-27
+### Added
+- Initial project setup.`
+  },
+  {
     name: 'appsscript.json',
     content: `{
   "timeZone": "America/New_York",
@@ -73,6 +101,21 @@ function processData() {
   var matches = MyGreeterLibrary.findMatchingData();
   Logger.log(matches.length + ' matches found.');
 }`,
+  },
+    {
+    name: 'CHANGELOG.md',
+    content: `# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [1.0.0] - 2025-05-27
+### Added
+- Initial frontend setup.`
   },
   {
     name: 'appsscript.json',

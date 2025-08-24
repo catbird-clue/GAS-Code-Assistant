@@ -18,6 +18,7 @@ interface AnalysisResultProps {
   onDismissNotification: () => void;
   analysisStats: AnalysisStats | null;
   onUndo: () => void;
+  onUndoFix: (fileName: string, recIndex: number) => void;
   canUndo: boolean;
   selectedFixes: Record<string, any>;
   onToggleFixSelection: (key: string, fixDetails: {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}) => void;
@@ -182,10 +183,11 @@ const SuggestionCard: React.FC<{
     isApplied: boolean;
     isAnyApplied: boolean;
     onApply: () => void;
+    onUndo?: () => void;
     language: string;
     isSelected: boolean;
     onToggleSelection: () => void;
-}> = ({ suggestion, isApplied, isAnyApplied, onApply, language, isSelected, onToggleSelection }) => {
+}> = ({ suggestion, isApplied, isAnyApplied, onApply, onUndo, language, isSelected, onToggleSelection }) => {
     const { t } = useTranslation();
     return (
         <div className={`mt-4 p-4 rounded-lg border relative ${isApplied ? 'border-green-700 bg-green-900/20' : isSelected ? 'border-indigo-500 bg-indigo-900/20' : 'border-gray-700 bg-gray-900/50'}`}>
@@ -206,11 +208,20 @@ const SuggestionCard: React.FC<{
             <CodeBlock language={language}>{suggestion.correctedCodeSnippet}</CodeBlock>
 
             {isApplied ? (
-                <div
-                    className="mt-3 w-full sm:w-auto flex items-center justify-center gap-2 bg-green-900/50 text-green-400 font-semibold px-4 py-2 rounded-md text-sm cursor-default"
-                >
-                    <CheckIcon />
-                    {t('appliedStatus')}
+                 <div className="mt-3 flex items-center gap-4">
+                    <div className="flex items-center justify-center gap-2 bg-green-900/50 text-green-400 font-semibold px-4 py-2 rounded-md text-sm cursor-default">
+                        <CheckIcon />
+                        {t('appliedStatus')}
+                    </div>
+                    {onUndo && (
+                        <button 
+                            onClick={onUndo}
+                            className="text-sm text-gray-400 hover:text-white hover:underline transition-colors font-semibold"
+                            aria-label={t('undoSpecificFix')}
+                        >
+                            {t('undo')}
+                        </button>
+                    )}
                 </div>
             ) : (
                 <button 
@@ -231,9 +242,10 @@ const RecommendationCard: React.FC<{
     recommendation: Recommendation; 
     recIndex: number; 
     onApplyFix: AnalysisResultProps['onApplyFix'];
+    onUndoFix: AnalysisResultProps['onUndoFix'];
     selectedFixes: AnalysisResultProps['selectedFixes'];
     onToggleFixSelection: AnalysisResultProps['onToggleFixSelection'];
-}> = ({ fileName, recommendation, recIndex, onApplyFix, selectedFixes, onToggleFixSelection }) => {
+}> = ({ fileName, recommendation, recIndex, onApplyFix, onUndoFix, selectedFixes, onToggleFixSelection }) => {
   const { t } = useTranslation();
   
   const handleFix = (suggestionIndex: number) => {
@@ -251,17 +263,6 @@ const RecommendationCard: React.FC<{
 
   return (
     <div className={`bg-gray-800/50 p-4 rounded-lg border ${isAnySuggestionApplied ? 'border-green-800/50' : 'border-gray-700'} mb-4`}>
-       <div className="flex justify-between items-center mb-2">
-            {isAnySuggestionApplied ? (
-              <div className="text-xs font-bold text-green-400 uppercase flex items-center gap-2">
-                <CheckIcon />
-                {t('fixApplied')}
-              </div>
-            ) : (
-                <div></div>
-            )}
-       </div>
-
       <div className="text-gray-300 mb-3" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(recommendation.description) as string) }} />
       
       {recommendation.originalCodeSnippet && (
@@ -275,13 +276,19 @@ const RecommendationCard: React.FC<{
         <div className="mt-4">
             {recommendation.suggestions.map((suggestion, index) => {
                 const key = `${fileName}|${recIndex}|${index}`;
+                const isApplied = recommendation.appliedSuggestionIndex === index;
+                const handleUndo = isApplied && recommendation.appliedRefactorResult 
+                    ? () => onUndoFix(fileName, recIndex) 
+                    : undefined;
+
                 return (
                   <SuggestionCard 
                       key={index}
                       suggestion={suggestion}
-                      isApplied={recommendation.appliedSuggestionIndex === index}
+                      isApplied={isApplied}
                       isAnyApplied={isAnySuggestionApplied}
                       onApply={() => handleFix(index)}
+                      onUndo={handleUndo}
                       language={language}
                       isSelected={!!selectedFixes[key]}
                       onToggleSelection={() => onToggleFixSelection(key, {fileName, rec: recommendation, recIndex, suggestionIndex: index})}
@@ -298,9 +305,10 @@ const RecommendationCard: React.FC<{
 const FileAnalysisCard: React.FC<{ 
     fileAnalysis: FileAnalysis; 
     onApplyFix: AnalysisResultProps['onApplyFix'];
+    onUndoFix: AnalysisResultProps['onUndoFix'];
     selectedFixes: AnalysisResultProps['selectedFixes'];
     onToggleFixSelection: AnalysisResultProps['onToggleFixSelection'];
-}> = ({ fileAnalysis, onApplyFix, selectedFixes, onToggleFixSelection }) => (
+}> = ({ fileAnalysis, onApplyFix, onUndoFix, selectedFixes, onToggleFixSelection }) => (
   <div className="mb-6">
     <h3 className="text-lg font-semibold mt-6 mb-3 text-indigo-300 border-b border-gray-700 pb-2">{fileAnalysis.fileName}</h3>
     {fileAnalysis.recommendations.map((rec, index) => (
@@ -310,6 +318,7 @@ const FileAnalysisCard: React.FC<{
         recommendation={rec} 
         recIndex={index} 
         onApplyFix={onApplyFix}
+        onUndoFix={onUndoFix}
         selectedFixes={selectedFixes}
         onToggleFixSelection={onToggleFixSelection}
       />
@@ -317,7 +326,7 @@ const FileAnalysisCard: React.FC<{
   </div>
 );
 
-const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, hasFiles, onApplyFix, notification, onDismissNotification, analysisStats, onUndo, canUndo, selectedFixes, onToggleFixSelection, onApplySelectedFixes, isApplyingChanges }) => {
+const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, hasFiles, onApplyFix, notification, onDismissNotification, analysisStats, onUndo, onUndoFix, canUndo, selectedFixes, onToggleFixSelection, onApplySelectedFixes, isApplyingChanges }) => {
   const { t } = useTranslation();
   const selectedCount = Object.keys(selectedFixes).length;
 
@@ -361,13 +370,13 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, ha
             {analysis.libraryProject.length > 0 && (
                 <div className="mb-8">
                     <h2 className="text-xl font-bold mt-4 mb-4 text-white">{t('libraryProjectTitle')}</h2>
-                    {analysis.libraryProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
+                    {analysis.libraryProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} onUndoFix={onUndoFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
                 </div>
             )}
             {analysis.frontendProject.length > 0 && (
                   <div className="mb-8">
                     <h2 className="text-xl font-bold mt-8 mb-4 text-white">{t('frontendProjectTitle')}</h2>
-                    {analysis.frontendProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
+                    {analysis.frontendProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} onUndoFix={onUndoFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
                 </div>
             )}
             <div>

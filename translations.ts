@@ -1,4 +1,3 @@
-
 export const translations: Record<string, Record<string, string>> = {
   en: {
     // Header
@@ -67,6 +66,8 @@ export const translations: Record<string, Record<string, string>> = {
     fixesAppliedNotification: "{{count}} fixes applied.",
     undoNotification: "The last change was undone.",
     demoProjectLoaded: "Demo project loaded successfully.",
+    specificUndoSuccess: "The fix has been reverted.",
+    undoFailedError: "Could not undo the fix because the necessary undo data was not found.",
     
     // Analysis Result Pane
     analysisInProgress: "Analyzing your code... This may take a few seconds.",
@@ -90,6 +91,7 @@ export const translations: Record<string, Record<string, string>> = {
     problemCode: "Problem Code",
     selectFixAria: "Select this fix",
     undo: "Undo",
+    undoSpecificFix: "Undo this fix",
     closeNotificationAria: "Close notification",
     overallSummary: "Overall Summary",
     fixesSelected: "{{count}} fixes selected",
@@ -203,6 +205,8 @@ export const translations: Record<string, Record<string, string>> = {
     fixesAppliedNotification: "{{count}} исправлений применено.",
     undoNotification: "Последнее изменение было отменено.",
     demoProjectLoaded: "Демо-проект успешно загружен.",
+    specificUndoSuccess: "Исправление отменено.",
+    undoFailedError: "Не удалось отменить исправление, так как не найдены необходимые данные для отмены.",
 
     // Analysis Result Pane
     analysisInProgress: "Идет анализ вашего кода... Это может занять несколько секунд.",
@@ -226,6 +230,7 @@ export const translations: Record<string, Record<string, string>> = {
     problemCode: "Проблемный код",
     selectFixAria: "Выбрать это исправление",
     undo: "Отменить",
+    undoSpecificFix: "Отменить это исправление",
     closeNotificationAria: "Закрыть уведомление",
     overallSummary: "Общий вывод",
     fixesSelected: "Выбрано исправлений: {{count}}",

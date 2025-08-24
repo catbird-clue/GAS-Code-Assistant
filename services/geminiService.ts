@@ -14,6 +14,10 @@ const ai = new GoogleGenAI({
   apiKey: API_KEY,
 });
 
+const hasChangelogFile = (libraryFiles: UploadedFile[], frontendFiles: UploadedFile[]): boolean => {
+  return [...libraryFiles, ...frontendFiles].some(f => f.name.toUpperCase() === 'CHANGELOG.MD');
+};
+
 const createProjectSection = (title: string, files: UploadedFile[]): string => {
   if (files.length === 0) return "";
   const fileContents = files.map(file => 
@@ -182,8 +186,11 @@ function buildAnalysisPrompt({ libraryFiles, frontendFiles, language }: { librar
     ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, suggestions, and summaries, must be in Russian."
     : "You MUST respond exclusively in English. All text, including descriptions, titles, suggestions, and summaries, must be in English.";
 
-  const changelogPolicyInstruction = isRussian
-    ? `
+  const hasChangelog = hasChangelogFile(libraryFiles, frontendFiles);
+
+  const changelogPolicyInstruction = hasChangelog
+    ? (isRussian
+      ? `
 **Интеграция с политикой Changelog:**
 Для каждого предлагаемого исправления ты должен определить, подпадает ли оно под критерии для записи в журнал изменений согласно стандарту "Keep a Changelog" (т.е. является ли оно видимым для пользователя изменением типа 'Fixed', 'Added', 'Changed', а не внутренним 'refactor' или 'chore').
 - Если изменение **БУДЕТ** добавлено в журнал, ты ОБЯЗАН добавить следующее примечание в формате Markdown в конец поля \`description\` этого предложения:
@@ -192,7 +199,7 @@ function buildAnalysisPrompt({ libraryFiles, frontendFiles, language }: { librar
   > **Примечание:** Это внутреннее улучшение и оно не будет добавлено в \`CHANGELOG.md\`.
 Это примечание является обязательным для каждого предложения.
 `
-    : `
+      : `
 **Changelog Policy Integration:**
 For each suggestion you provide, you must determine if the change qualifies for a changelog entry according to the "Keep a Changelog" standard (i.e., it's a user-visible 'Fixed', 'Added', 'Changed', etc., and not an internal 'refactor' or 'chore').
 - If the change **WILL** be logged, you MUST append the following Markdown note to the end of the suggestion's \`description\`:
@@ -200,7 +207,11 @@ For each suggestion you provide, you must determine if the change qualifies for 
 - If the change **WILL NOT** be logged (e.g., it's a refactor), you MUST append the following Markdown note to the end of the suggestion's \`description\`:
   > **Note:** This is an internal improvement and will not be added to \`CHANGELOG.md\`.
 This note is mandatory for every suggestion.
-`;
+`)
+    : (isRussian
+      ? `**Политика Changelog:** В проекте отсутствует файл \`CHANGELOG.md\`. НЕ добавляйте никаких примечаний о журнале изменений в ваши ответы.`
+      : `**Changelog Policy:** The project does not contain a \`CHANGELOG.md\` file. DO NOT add any notes about a changelog to your responses.`);
+
 
   return `
 You are an expert Google Apps Script (GAS) developer and code reviewer. Your task is to analyze the provided GAS project files and return your analysis in a structured JSON format.
@@ -222,9 +233,13 @@ Analyze them with this relationship in mind.
     - **CRITICAL:** The \`originalCodeSnippet\` **MUST NOT** contain any of your suggested changes or new code. It is only for identifying the code to be replaced.
 4.  **Handle Multiple Solutions:** If a problem has multiple valid solutions (e.g., 'do A or do B'), list each one as a separate suggestion object in the \`suggestions\` array. Each suggestion must have a clear \`title\`, a \`description\` of the approach, and the corresponding \`correctedCodeSnippet\`. If there is only one solution, the \`suggestions\` array should still contain one object.
 5.  **Handle General Advice:** If a recommendation is general and doesn't apply to a specific block of code, the \`originalCodeSnippet\` field should be null, and the \`suggestions\` array should be empty.
-6.  **W3C Standards for HTML:** ${isRussian ? "Для HTML-файлов (`.html`) уделите особое внимание соответствию стандартам W3C (например, правильная вложенность тегов, валидные атрибуты, доступность). Учитывайте, что Google Apps Script может добавлять свой код, но код, написанный пользователем, должен соответствовать стандартам." : "For any HTML files (`.html`), pay special attention to compliance with W3C standards (e.g., proper tag nesting, valid attributes, accessibility). Acknowledge that Google Apps Script may inject its own code, but the user-written code should be standard-compliant."}
-7.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
-8.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
+6.  **${isRussian ? "Обработка унаследованных проблем" : "Handle Inherited Issues"}:** ${isRussian ? "Если ты обнаружил проблему во **Фронтенд-проекте**, которая вызвана функцией или зависимостью из **Основного проекта (Библиотеки)** (например, фронтенд вызывает неэффективную функцию библиотеки), ты **ОБЯЗАН** создать рекомендацию." : "If you find an issue in the **Frontend Project** that is caused by a function or dependency from the **Main Project (Library)** (e.g., the frontend calls an inefficient library function), you **MUST** create a recommendation."}
+    - ${isRussian ? "В поле `description` должно быть четко указано, что первопричина находится в библиотеке, и исправление должно быть применено там." : "The `description` should clearly state that the root cause is in the library and the fix should be applied there."}
+    - ${isRussian ? "Ты **ОБЯЗАН** предоставить `originalCodeSnippet` и как минимум одно `suggestion` в массиве `suggestions`." : "You **MUST** still provide an `originalCodeSnippet` and at least one `suggestion` in the `suggestions` array."}
+    - ${isRussian ? "Для этого предложения создай \"исправление-заглушку\". `title` должен быть примерно таким: \"Принять к сведению\", а `description` должен повторять, что исправление находится в библиотеке. `correctedCodeSnippet` **ОБЯЗАН** быть идентичным `originalCodeSnippet`. Это гарантирует, что пользователь будет проинформирован о проблеме в интерфейсе, даже если код в этом конкретном файле не изменится." : "For the suggestion, create a \"placeholder\" fix. The `title` should be something like \"Acknowledge Issue\" and the `description` should reiterate that the fix is in the library. The `correctedCodeSnippet` **MUST** be identical to the `originalCodeSnippet`. This ensures the user is informed of the issue within the UI, even though the code in this specific file won't change."}
+7.  **W3C Standards for HTML:** ${isRussian ? "Для HTML-файлов (`.html`) уделите особое внимание соответствию стандартам W3C (например, правильная вложенность тегов, валидные атрибуты, доступность). Учитывайте, что Google Apps Script может добавлять свой код, но код, написанный пользователем, должен соответствовать стандартам." : "For any HTML files (`.html`), pay special attention to compliance with W3C standards (e.g., proper tag nesting, valid attributes, accessibility). Acknowledge that Google Apps Script may inject its own code, but the user-written code should be standard-compliant."}
+8.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
+9.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
 
 ${changelogPolicyInstruction}
 
@@ -397,10 +412,13 @@ ${JSON.stringify({ overallSummary: analysis.overallSummary, libraryProject: anal
   const langInstruction = isRussian 
     ? "You MUST respond exclusively in Russian. Format your responses using Markdown for readability.\n**Отвечай лаконично и по существу, если пользователь не просит предоставить больше деталей.**"
     : "You MUST respond exclusively in English. Format your responses using Markdown for readability.\n**Answer concisely and to the point, unless the user asks for more details.**";
-
-  const changelogNote = isRussian
-    ? "**ВАЖНОЕ ЗАМЕЧАНИЕ О ПОВЕДЕНИИ:** Когда пользователь применяет предложенное тобой исправление, ты автоматически пытаешься найти и обновить файл `CHANGELOG.md`, добавляя в него описание изменения. Если тебя спросят об этом процессе, ты ДОЛЖЕН подтвердить, что это автоматическая функция. Не говори пользователю, что ему нужно обновлять журнал изменений вручную."
-    : "**IMPORTANT BEHAVIOR NOTE:** When a user applies a fix you suggested, you will automatically attempt to find and update a `CHANGELOG.md` file with a summary of the change. When asked about this process, you MUST confirm that this is an automated feature. Do not tell the user they need to update the changelog manually.";
+  
+  const hasChangelog = hasChangelogFile(libraryFiles, frontendFiles);
+  const changelogNote = hasChangelog
+    ? (isRussian
+      ? "**ВАЖНОЕ ЗАМЕЧАНИЕ О ПОВЕДЕНИИ:** Когда пользователь применяет предложенное тобой исправление, ты автоматически пытаешься найти и обновить файл `CHANGELOG.md`, добавляя в него описание изменения. Если тебя спросят об этом процессе, ты ДОЛЖЕН подтвердить, что это автоматическая функция. Не говори пользователю, что ему нужно обновлять журнал изменений вручную."
+      : "**IMPORTANT BEHAVIOR NOTE:** When a user applies a fix you suggested, you will automatically attempt to find and update a `CHANGELOG.md` file with a summary of the change. When asked about this process, you MUST confirm that this is an automated feature. Do not tell the user they need to update the changelog manually.")
+    : "";
 
   return `
 You are an expert Google Apps Script (GAS) developer and a helpful code assistant. Your memory of the project state is updated with each question.
@@ -478,6 +496,12 @@ export async function refactorCode({ code, instruction, fileName, libraryFiles, 
     ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, and manual steps, must be in Russian."
     : "You MUST respond exclusively in English. All text, including descriptions, titles, and manual steps, must be in English.";
 
+  const changelogInstruction = isRussian 
+    ? `**КРИТИЧЕСКИ ВАЖНОЕ ЗАМЕЧАНИЕ О CHANGELOG:**
+Вы НЕ ДОЛЖНЫ изменять или создавать файл CHANGELOG.md. Не включайте в свой ответ никаких изменений для файла с именем 'CHANGELOG.md'. Приложение обрабатывает обновления журнала изменений отдельно. Ваша единственная обязанность — предоставить изменения кода для исходных файлов (.gs, .js, .html и т. д.).`
+    : `**CRITICAL NOTE ON CHANGELOG:**
+You MUST NOT modify or create a CHANGELOG.md file. Do not include any changes for a file named 'CHANGELOG.md' in your response. The application handles changelog updates separately. Your sole responsibility is to provide the code changes for the actual source files (.gs, .js, .html, etc.).`;
+
   const prompt = `
 You are an expert Google Apps Script (GAS) developer specializing in context-aware code refactoring.
 Your task is to refactor a specific code snippet based on the provided instruction and return a structured JSON object detailing all necessary changes. 
@@ -503,10 +527,16 @@ ${frontendSection}
 
 ---
 
+${changelogInstruction}
+
+---
+
 **Your Task & JSON Output:**
 1.  **Refactor the Main Snippet:** Create the corrected version of the code snippet for the 'mainChange'. The \`originalCodeSnippet\` for the main change should be the one provided to you above.
 2.  **Analyze Project-Wide Impact:** Based on the full context, identify ALL other files and code snippets that need to be updated as a direct consequence of the main change. These are the 'relatedChanges'.
 3.  **Provide Snippets for All Changes:** For every main and related change, you MUST provide the \`originalCodeSnippet\` to be replaced and the new, \`correctedCodeSnippet\`.
+    - **CRITICAL:** The \`fileName\` for every change MUST exactly match one of the files provided in the 'Full Project Context'.
+    - **CRITICAL:** The \`fileName\` must be the base name of the file ONLY (e.g., \`Code.gs\`, \`utils.js\`). It MUST NOT include any prefixes, paths, or section titles (e.g., DO NOT use \`Основной проект/Code.gs\` or \`Frontend/utils.js\`).
     - **CRITICAL:** The \`originalCodeSnippet\` for every change MUST be a complete, self-contained block of code.
     - **CRITICAL:** It MUST be an **exact, verbatim, character-for-character copy** of the code from the source file, including all whitespace, indentation, and comments.
     - **CRITICAL:** This is the most common point of failure. Do not hallucinate or modify the \`originalCodeSnippet\` in any way. It must be a direct copy from the files provided in the context. This is critical for the replacement logic to work.
@@ -570,7 +600,10 @@ ${frontendSection}
 **CRITICAL INSTRUCTIONS FOR YOUR SECOND ATTEMPT:**
 1.  **Re-analyze the Goal:** Carefully re-read the original refactoring goal.
 2.  **Generate a New Plan:** Create a new, complete refactoring plan. Do not just fix the broken parts; regenerate the entire plan to ensure consistency.
-3.  **FIX THE SNIPPETS:** The most important task is to fix your previous mistake. For every \`originalCodeSnippet\` in your new plan, it **MUST** be a perfect, verbatim, character-for-character copy from the project files provided above. Check indentation, comments, and whitespace. This is the only way the automated tool can apply your changes.
+3.  **FIX THE SNIPPETS AND FILE NAMES:** The most important task is to fix your previous mistake. Your previous attempt may have failed because you provided incorrect \`originalCodeSnippet\` values or invented file names that do not exist.
+    - In your new plan, the \`fileName\` for every change **MUST** exactly match one of the files provided in the 'Full Project Context'.
+    - **CRITICAL:** The \`fileName\` must be the base name of the file ONLY (e.g., \`Code.gs\`, \`utils.js\`). It MUST NOT include any prefixes, paths, or section titles (e.g., DO NOT use \`Основной проект/Code.gs\` or \`Frontend/utils.js\`).
+    - The \`originalCodeSnippet\` for every change **MUST** be a perfect, verbatim, character-for-character copy from the project files provided above. Check indentation, comments, and whitespace. This is the only way the automated tool can apply your changes.
 4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
 `;
   const { refactorSchema } = getSchemas(language);
@@ -597,6 +630,12 @@ export async function batchRefactorCode({ instructions, libraryFiles, frontendFi
       \`\`\`
   `).join('\n---\n');
   
+  const changelogInstruction = isRussian 
+    ? `**КРИТИЧЕСКИ ВАЖНОЕ ЗАМЕЧАНИЕ О CHANGELOG:**
+Вы НЕ ДОЛЖНЫ изменять или создавать файл CHANGELOG.md. Не включайте в свой ответ никаких изменений для файла с именем 'CHANGELOG.md'. Приложение обрабатывает обновления журнала изменений отдельно. Ваша единственная обязанность — предоставить изменения кода для исходных файлов (.gs, .js, .html и т. д.).`
+    : `**CRITICAL NOTE ON CHANGELOG:**
+You MUST NOT modify or create a CHANGELOG.md file. Do not include any changes for a file named 'CHANGELOG.md' in your response. The application handles changelog updates separately. Your sole responsibility is to provide the code changes for the actual source files (.gs, .js, .html, etc.).`;
+
   const prompt = `
 You are an expert Google Apps Script (GAS) developer specializing in context-aware, batch code refactoring.
 Your task is to perform multiple refactoring tasks across the entire project simultaneously. You will receive a list of tasks. You must analyze their combined impact and produce a single, consolidated list of changes in a JSON object.
@@ -614,10 +653,16 @@ ${instructionsText}
 
 ---
 
+${changelogInstruction}
+
+---
+
 **Your Task & JSON Output:**
 1.  **Consolidate All Changes:** Analyze all tasks and their project-wide impact. Generate a single, flat list of all unique code changes required. Each change object in the 'changes' array must contain the file name, a description, the exact original code snippet, and the corrected code snippet.
-2.  **Ensure Exact Snippets:** For each change, the \`originalCodeSnippet\` is the most critical part.
-    - **CRITICAL:** It MUST be a complete, self-contained block of code.
+2.  **Ensure Exact Snippets and File Names:** For each change, the \`originalCodeSnippet\` and \`fileName\` are the most critical parts.
+    - **CRITICAL:** The \`fileName\` for every change MUST exactly match one of the files provided in the 'Full Project Context'.
+    - **CRITICAL:** The \`fileName\` must be the base name of the file ONLY (e.g., \`Code.gs\`, \`utils.js\`). It MUST NOT include any prefixes, paths, or section titles (e.g., DO NOT use \`Основной проект/Code.gs\` or \`Frontend/utils.js\`).
+    - **CRITICAL:** The \`originalCodeSnippet\` MUST be a complete, self-contained block of code.
     - **CRITICAL:** It MUST be an **exact, verbatim, character-for-character copy** from the source files. Do not change indentation, whitespace, or comments.
     - **CRITICAL:** You must not invent or modify the \`originalCodeSnippet\`. It is only used to find and replace code. An incorrect snippet will cause the entire process to fail.
 3.  **Consolidate Manual Steps:** Review all changes and create a consolidated, de-duplicated list of any manual follow-up actions required.

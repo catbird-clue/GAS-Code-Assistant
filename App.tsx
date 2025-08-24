@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult, FailedChange, ModelName } from './types';
 import FileUpload from './components/FileUpload';
@@ -357,6 +358,7 @@ export default function App(): React.ReactNode {
 
       if (fileAnalysis && fileAnalysis.recommendations[recIndex]) {
         fileAnalysis.recommendations[recIndex].appliedSuggestionIndex = suggestionIndex;
+        fileAnalysis.recommendations[recIndex].appliedRefactorResult = result;
         setAnalysisResult(newAnalysisResult);
       } else {
         setError(t('originalRecommendationError', {fileName}));
@@ -368,32 +370,35 @@ export default function App(): React.ReactNode {
     setNotification(t('changesAppliedNotification'));
   
     // Update changelog
-    const changelogFile = [...newLibraryFiles, ...newFrontendFiles].find(f => f.name.toUpperCase() === 'CHANGELOG.MD');
-    if (changelogFile && result.mainChange) {
-      try {
-        const rec = refactoringRecommendation ? 
-          (analysisResult?.libraryProject.find(f => f.fileName === refactoringRecommendation.fileName) || analysisResult?.frontendProject.find(f => f.fileName === refactoringRecommendation.fileName))?.recommendations[refactoringRecommendation.recIndex]
-          : null;
-        
-        const title = rec?.suggestions[refactoringRecommendation!.suggestionIndex].title || 'Applied code refactoring';
-        const changeDescription = t('changelogEntry', { fileName: refactoringRecommendation!.fileName, title });
+    if (refactoringRecommendation && result.mainChange) {
+      const { fileName } = refactoringRecommendation;
+      const isLibraryChange = newLibraryFiles.some(f => f.name === fileName);
 
-        const updatedChangelogContent = await updateChangelog({
-            currentChangelog: changelogFile.content,
-            changeDescription: changeDescription,
-            language,
-            modelName
-        });
-        
-        const isLibrary = newLibraryFiles.some(f => f.name === changelogFile.name);
-        if (isLibrary) {
-            setLibraryFiles(prev => prev.map(f => f.name === changelogFile.name ? { ...f, content: updatedChangelogContent } : f));
-        } else {
-            setFrontendFiles(prev => prev.map(f => f.name === changelogFile.name ? { ...f, content: updatedChangelogContent } : f));
+      const projectFiles = isLibraryChange ? newLibraryFiles : newFrontendFiles;
+      const setProjectFiles = isLibraryChange ? setLibraryFiles : setFrontendFiles;
+      
+      const changelogFile = projectFiles.find(f => f.name.toUpperCase() === 'CHANGELOG.MD');
+      
+      if (changelogFile) {
+        try {
+          const rec = 
+            (analysisResult?.libraryProject.find(f => f.fileName === fileName) || analysisResult?.frontendProject.find(f => f.fileName === fileName))
+            ?.recommendations[refactoringRecommendation.recIndex];
+          
+          const title = rec?.suggestions[refactoringRecommendation.suggestionIndex].title || 'Applied code refactoring';
+          const changeDescription = t('changelogEntry', { fileName, title });
+
+          const updatedChangelogContent = await updateChangelog({
+              currentChangelog: changelogFile.content,
+              changeDescription: changeDescription,
+              language,
+              modelName
+          });
+          
+          setProjectFiles(prev => prev.map(f => f.name === changelogFile.name ? { ...f, content: updatedChangelogContent, changesCount: (f.changesCount || 0) + 1 } : f));
+        } catch (e) {
+          setNotification(`${t('changesAppliedNotification')} ${t('changelogUpdateFailed')}`);
         }
-
-      } catch (e) {
-        setNotification(`${t('changesAppliedNotification')} ${t('changelogUpdateFailed')}`);
       }
     }
 
@@ -412,6 +417,17 @@ export default function App(): React.ReactNode {
       setNotification(t('undoNotification'));
     }
   };
+
+  const handleUndoSpecificFix = useCallback(() => {
+    const lastState = undoStack[undoStack.length - 1];
+    if (!lastState) {
+      console.error("Undo stack is empty, cannot perform specific undo.");
+      setError(t('undoFailedError'));
+      return;
+    }
+    handleUndo();
+    setNotification(t('specificUndoSuccess'));
+  }, [undoStack, t, handleUndo]);
 
   const handleToggleFixSelection = (key: string, fixDetails: {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}) => {
     setSelectedFixes(prev => {
@@ -486,32 +502,46 @@ export default function App(): React.ReactNode {
         setNotification(t('fixesAppliedNotification', { count: appliedCount }));
         setSelectedFixes({});
         
-        // Update changelog
-        const changelogFile = [...newLibraryFiles, ...newFrontendFiles].find(f => f.name.toUpperCase() === 'CHANGELOG.MD');
-        if (changelogFile) {
-            let currentChangelogContent = changelogFile.content;
-            for (const fix of fixesToApply) {
+        // Update changelogs for both projects if needed
+        const updateProjectChangelog = async (
+            fixes: typeof fixesToApply, 
+            projectFiles: UploadedFile[], 
+            setProjectFiles: React.Dispatch<React.SetStateAction<UploadedFile[]>>
+        ) => {
+            if (fixes.length === 0) return;
+
+            const changelogFile = projectFiles.find(f => f.name.toUpperCase() === 'CHANGELOG.MD');
+            if (!changelogFile) return;
+
+            const changeDescriptions = fixes.map(fix => {
+                const title = fix.rec.suggestions[fix.suggestionIndex].title;
+                return t('changelogEntry', { fileName: fix.fileName, title });
+            });
+
+            if (changeDescriptions.length > 0) {
+                const combinedDescription = changeDescriptions.join('\n- ');
                 try {
-                    const title = fix.rec.suggestions[fix.suggestionIndex].title;
-                    const changeDescription = t('changelogEntry', { fileName: fix.fileName, title });
-                    currentChangelogContent = await updateChangelog({
-                        currentChangelog: currentChangelogContent,
-                        changeDescription,
+                    const updatedChangelogContent = await updateChangelog({
+                        currentChangelog: changelogFile.content,
+                        changeDescription: combinedDescription,
                         language,
                         modelName
                     });
-                } catch(e) {
-                   console.error(`Failed to update changelog for ${fix.fileName}`, e);
-                   setError(t('changelogUpdateError', { fileName: fix.fileName}));
+
+                    setProjectFiles(prev => prev.map(f => f.name === changelogFile.name ? { ...f, content: updatedChangelogContent, changesCount: (f.changesCount || 0) + changeDescriptions.length } : f));
+                } catch (e) {
+                    console.error(`Failed to update changelog for batch fixes`, e);
+                    setError(t('changelogUpdateFailed'));
                 }
             }
-            const isLibrary = newLibraryFiles.some(f => f.name === changelogFile.name);
-            if (isLibrary) {
-                setLibraryFiles(prev => prev.map(f => f.name === changelogFile.name ? { ...f, content: currentChangelogContent } : f));
-            } else {
-                setFrontendFiles(prev => prev.map(f => f.name === changelogFile.name ? { ...f, content: currentChangelogContent } : f));
-            }
-        }
+        };
+
+        const libraryFixes = fixesToApply.filter(fix => newLibraryFiles.some(f => f.name === fix.fileName));
+        const frontendFixes = fixesToApply.filter(fix => newFrontendFiles.some(f => f.name === fix.fileName));
+
+        await updateProjectChangelog(libraryFixes, newLibraryFiles, setLibraryFiles);
+        await updateProjectChangelog(frontendFixes, newFrontendFiles, setFrontendFiles);
+
 
     } catch (e) {
         console.error(e);
@@ -711,6 +741,7 @@ export default function App(): React.ReactNode {
                         onDismissNotification={() => setNotification(null)}
                         analysisStats={analysisStats}
                         onUndo={handleUndo}
+                        onUndoFix={handleUndoSpecificFix}
                         canUndo={undoStack.length > 0}
                         selectedFixes={selectedFixes}
                         onToggleFixSelection={handleToggleFixSelection}

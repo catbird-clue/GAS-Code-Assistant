@@ -19,6 +19,7 @@ export interface Recommendation {
   originalCodeSnippet: string | null;
   suggestions: SuggestedFix[];
   appliedSuggestionIndex?: number;
+  appliedRefactorResult?: RefactorResult;
 }
 
 export interface FileAnalysis {
