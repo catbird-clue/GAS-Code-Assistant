@@ -1,5 +1,4 @@
 
-
 export const translations: Record<string, Record<string, string>> = {
   en: {
     // Header
@@ -17,6 +16,9 @@ export const translations: Record<string, Record<string, string>> = {
     clickToUpload: "Click to upload",
     orDragAndDrop: "or drag and drop",
     supportedFiles: "Supports .gs, .js, .html, .json, .md",
+    fileCount_one: "({{count}} file)",
+    fileCount_few: "({{count}} files)",
+    fileCount_many: "({{count}} files)",
 
 
     // File list
@@ -29,7 +31,7 @@ export const translations: Record<string, Record<string, string>> = {
     analyze: "Analyze",
     reanalyze: "Re-analyze",
     analyzing: "Analyzing...",
-    test: "Test",
+    testWithDemo: "Test with Demo Project",
     ask: "Ask",
     answering: "Answering...",
     testResetWarning: "This action will reset the current files and analysis. Continue?",
@@ -64,6 +66,7 @@ export const translations: Record<string, Record<string, string>> = {
     changesAppliedNotification: "Changes applied successfully.",
     fixesAppliedNotification: "{{count}} fixes applied.",
     undoNotification: "The last change was undone.",
+    demoProjectLoaded: "Demo project loaded successfully.",
     
     // Analysis Result Pane
     analysisInProgress: "Analyzing your code... This may take a few seconds.",
@@ -150,6 +153,9 @@ export const translations: Record<string, Record<string, string>> = {
     clickToUpload: "Нажмите для загрузки",
     orDragAndDrop: "или перетащите",
     supportedFiles: "Поддерживаются .gs, .js, .html, .json, .md",
+    fileCount_one: "({{count}} файл)",
+    fileCount_few: "({{count}} файла)",
+    fileCount_many: "({{count}} файлов)",
 
     // File list
     download: "Скачать {{fileName}}",
@@ -161,7 +167,7 @@ export const translations: Record<string, Record<string, string>> = {
     analyze: "Анализ",
     reanalyze: "Повторить",
     analyzing: "Анализ...",
-    test: "Тест",
+    testWithDemo: "Тест с демо-проектом",
     ask: "Вопрос",
     answering: "Отвечаю...",
     testResetWarning: "Это действие приведет к сбросу текущих файлов и анализа. Продолжить?",
@@ -196,6 +202,7 @@ export const translations: Record<string, Record<string, string>> = {
     changesAppliedNotification: "Изменения успешно применены.",
     fixesAppliedNotification: "{{count}} исправлений применено.",
     undoNotification: "Последнее изменение было отменено.",
+    demoProjectLoaded: "Демо-проект успешно загружен.",
 
     // Analysis Result Pane
     analysisInProgress: "Идет анализ вашего кода... Это может занять несколько секунд.",

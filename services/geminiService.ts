@@ -182,6 +182,26 @@ function buildAnalysisPrompt({ libraryFiles, frontendFiles, language }: { librar
     ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, suggestions, and summaries, must be in Russian."
     : "You MUST respond exclusively in English. All text, including descriptions, titles, suggestions, and summaries, must be in English.";
 
+  const changelogPolicyInstruction = isRussian
+    ? `
+**Интеграция с политикой Changelog:**
+Для каждого предлагаемого исправления ты должен определить, подпадает ли оно под критерии для записи в журнал изменений согласно стандарту "Keep a Changelog" (т.е. является ли оно видимым для пользователя изменением типа 'Fixed', 'Added', 'Changed', а не внутренним 'refactor' или 'chore').
+- Если изменение **БУДЕТ** добавлено в журнал, ты ОБЯЗАН добавить следующее примечание в формате Markdown в конец поля \`description\` этого предложения:
+  > **Примечание:** Применение этого исправления автоматически добавит запись в ваш \`CHANGELOG.md\`.
+- Если изменение **НЕ БУДЕТ** добавлено в журнал (например, это рефакторинг), ты ОБЯЗАН добавить следующее примечание в формате Markdown в конец поля \`description\` этого предложения:
+  > **Примечание:** Это внутреннее улучшение и оно не будет добавлено в \`CHANGELOG.md\`.
+Это примечание является обязательным для каждого предложения.
+`
+    : `
+**Changelog Policy Integration:**
+For each suggestion you provide, you must determine if the change qualifies for a changelog entry according to the "Keep a Changelog" standard (i.e., it's a user-visible 'Fixed', 'Added', 'Changed', etc., and not an internal 'refactor' or 'chore').
+- If the change **WILL** be logged, you MUST append the following Markdown note to the end of the suggestion's \`description\`:
+  > **Note:** Applying this fix will automatically add an entry to your \`CHANGELOG.md\`.
+- If the change **WILL NOT** be logged (e.g., it's a refactor), you MUST append the following Markdown note to the end of the suggestion's \`description\`:
+  > **Note:** This is an internal improvement and will not be added to \`CHANGELOG.md\`.
+This note is mandatory for every suggestion.
+`;
+
   return `
 You are an expert Google Apps Script (GAS) developer and code reviewer. Your task is to analyze the provided GAS project files and return your analysis in a structured JSON format.
 ${langInstruction}
@@ -205,6 +225,8 @@ Analyze them with this relationship in mind.
 6.  **W3C Standards for HTML:** ${isRussian ? "Для HTML-файлов (`.html`) уделите особое внимание соответствию стандартам W3C (например, правильная вложенность тегов, валидные атрибуты, доступность). Учитывайте, что Google Apps Script может добавлять свой код, но код, написанный пользователем, должен соответствовать стандартам." : "For any HTML files (`.html`), pay special attention to compliance with W3C standards (e.g., proper tag nesting, valid attributes, accessibility). Acknowledge that Google Apps Script may inject its own code, but the user-written code should be standard-compliant."}
 7.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
 8.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
+
+${changelogPolicyInstruction}
 
 Here are the project files:
 

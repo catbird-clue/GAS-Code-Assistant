@@ -1,8 +1,5 @@
 
-
-
-import React, from 'react';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult, FailedChange, ModelName } from './types';
 import FileUpload from './components/FileUpload';
 import AnalysisResult from './components/AnalysisResult';
@@ -13,6 +10,7 @@ import RefactorResultModal from './components/RefactorResultModal';
 import { Chat } from '@google/genai';
 import HelpModal from './components/HelpModal';
 import { useTranslation } from './I18nContext';
+import { demoLibraryFiles, demoFrontendFiles } from './demoProject';
 
 interface UndoState {
   libraryFiles: UploadedFile[];
@@ -100,6 +98,18 @@ export default function App(): React.ReactNode {
   const handleRemoveFrontendFile = (indexToRemove: number) => {
     setFrontendFiles(prev => prev.filter((_, index) => index !== indexToRemove));
     clearAnalysisAndChat();
+  };
+
+  const handleTestProject = () => {
+    if (libraryFiles.length > 0 || frontendFiles.length > 0) {
+      if (!window.confirm(t('testResetWarning'))) {
+        return;
+      }
+    }
+    setLibraryFiles(demoLibraryFiles);
+    setFrontendFiles(demoFrontendFiles);
+    clearAnalysisAndChat();
+    setNotification(t('demoProjectLoaded'));
   };
 
   const handleAnalyze = useCallback(async () => {
@@ -523,6 +533,24 @@ export default function App(): React.ReactNode {
     URL.revokeObjectURL(url);
   };
   
+  const getFileCountText = (count: number): string => {
+    if (count === 0) return '';
+    
+    if (language === 'ru') {
+        const n = Math.abs(count) % 100;
+        const n1 = n % 10;
+        if (n > 10 && n < 20) return t('fileCount_many', { count });
+        if (n1 > 1 && n1 < 5) return t('fileCount_few', { count });
+        if (n1 === 1) return t('fileCount_one', { count });
+        return t('fileCount_many', { count });
+    }
+    
+    if (count === 1) {
+        return t('fileCount_one', { count });
+    }
+    return t('fileCount_many', { count });
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-white">
       <header className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-3 flex items-center justify-between sticky top-0 z-20">
@@ -559,7 +587,10 @@ export default function App(): React.ReactNode {
         <div className="w-1/3 max-w-sm flex flex-col border-r border-gray-700">
           <div className="p-4 flex-grow overflow-y-auto">
               <div className="mb-6">
-                  <h2 className="text-lg font-semibold mb-2 text-indigo-300">{t('libraryProjectTitle')}</h2>
+                  <h2 className="text-lg font-semibold mb-2 text-indigo-300 flex items-center justify-between">
+                    <span>{t('libraryProjectTitle')}</span>
+                    {libraryFiles.length > 0 && <span className="text-sm font-normal text-gray-400">{getFileCountText(libraryFiles.length)}</span>}
+                  </h2>
                   <p className="text-sm text-gray-400 mb-3">{t('libraryProjectDescription')}</p>
                   {libraryFiles.length === 0 ? (
                     <FileUpload onFilesUploaded={handleLibraryFilesUploaded} setError={setError} />
@@ -582,7 +613,10 @@ export default function App(): React.ReactNode {
                   )}
               </div>
               <div>
-                  <h2 className="text-lg font-semibold mb-2 text-indigo-300">{t('frontendProjectTitle')}</h2>
+                  <h2 className="text-lg font-semibold mb-2 text-indigo-300 flex items-center justify-between">
+                    <span>{t('frontendProjectTitle')}</span>
+                    {frontendFiles.length > 0 && <span className="text-sm font-normal text-gray-400">{getFileCountText(frontendFiles.length)}</span>}
+                  </h2>
                   <p className="text-sm text-gray-400 mb-3">{t('frontendProjectDescription')}</p>
                   {frontendFiles.length === 0 ? (
                     <FileUpload onFilesUploaded={handleFrontendFilesUploaded} setError={setError} />
@@ -621,6 +655,14 @@ export default function App(): React.ReactNode {
                             </svg>
                         )}
                         {analysisResult ? t('reanalyze') : t('analyze')}
+                    </button>
+                    <button
+                        onClick={handleTestProject}
+                        disabled={isAnalyzing}
+                        className="w-full sm:w-auto bg-gray-700 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-gray-600 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        title={t('testWithDemo')}
+                    >
+                      <BeakerIcon />
                     </button>
                 </div>
                 <div className="flex items-center justify-between text-sm">
