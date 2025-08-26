@@ -1,7 +1,9 @@
 
 
+
+
 import { GoogleGenAI, Type, Chat } from "@google/genai";
-import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation, FailedChange, ModelName, FileAnalysis, ProgressUpdate } from '../types';
+import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation, FailedChange, ModelName, FileAnalysis, ProgressUpdate, ConversationTurn } from '../types';
 import { Language } from "../I18nContext";
 
 const API_KEY = process.env.API_KEY;
@@ -13,10 +15,6 @@ if (!API_KEY) {
 const ai = new GoogleGenAI({
   apiKey: API_KEY,
 });
-
-const hasChangelogFile = (libraryFiles: UploadedFile[], frontendFiles: UploadedFile[]): boolean => {
-  return [...libraryFiles, ...frontendFiles].some(f => f.name.toUpperCase() === 'CHANGELOG.MD');
-};
 
 const createProjectSection = (title: string, files: UploadedFile[]): string => {
   if (files.length === 0) return "";
@@ -90,7 +88,7 @@ const getSchemas = (language: Language) => {
             originalCodeSnippet: { type: Type.STRING },
             correctedCodeSnippet: { type: Type.STRING },
         },
-        required: ['fileName', 'description', 'originalCodeSnippet', 'correctedCodeSnippet']
+        required: ['fileName', 'originalCodeSnippet', 'correctedCodeSnippet']
     };
 
     const manualStepSchema = {
@@ -172,7 +170,7 @@ Keep this context in mind when identifying issues, especially potential integrat
     - **CRITICAL:** The \`originalCodeSnippet\` must be a complete, self-contained block of code (e.g., a full function definition from \`function\` to its closing \`}\`).
     - **CRITICAL:** It must be an **exact, character-for-character copy** from the user's file. Do not change anything.
 3.  **Handle Multiple Solutions:** If a problem has multiple valid solutions, list each as a separate suggestion.
-4.  **Handle General Advice:** If a recommendation is general (e.g., "Add comments"), \`originalCodeSnippet\` can be null and \`suggestions\` can be empty.
+4.  **Handle General Advice:** If a recommendation is general (e.g., "Add comments"), \`originalCodeSnippet\` can be null.
 5.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
 
 **File to Analyze: ${fileToAnalyze.name}**
@@ -205,6 +203,50 @@ ${langInstruction}
 ${JSON.stringify(analysis, null, 2)}
 \`\`\`
 `;
+}
+
+async function callGeminiWithFetch(prompt: string, schema: object | null, modelName: ModelName) {
+    const API_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
+  
+    const contents = [{ parts: [{ text: prompt }] }];
+    const generationConfig: any = {};
+    if (schema) {
+      generationConfig.responseMimeType = "application/json";
+      generationConfig.responseSchema = schema;
+    }
+
+    const res = await fetch(API_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents, ...(Object.keys(generationConfig).length > 0 && { generationConfig }) })
+    });
+
+    if (!res.ok) {
+        const errorData = await res.json();
+        console.error("Fallback API error response:", errorData);
+        throw new Error(`Fallback API error: ${errorData.error?.message || 'Unknown fallback error'}`);
+    }
+
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (text === undefined) {
+         if (data.promptFeedback && data.promptFeedback.blockReason) {
+            throw new Error(`Response blocked due to ${data.promptFeedback.blockReason}.`);
+        }
+        console.error("Invalid response structure from fallback API:", data);
+        throw new Error("Invalid response structure from fallback API.");
+    }
+
+    if (schema) {
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            console.error("Failed to parse JSON from fallback API:", text);
+            throw new Error("Fallback API returned invalid JSON.");
+        }
+    }
+    return text;
 }
 
 
@@ -249,15 +291,25 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
               : `The analysis was not completed successfully: ${reasonText} This often happens when using a free API key with low rate limits. Please check your API key quotas in Google AI Studio.`
           );
       }
+      
+      const jsonText = response.text.trim();
 
       if (schema) {
-        const jsonText = response.text.trim();
         return JSON.parse(jsonText);
       }
-      return response.text.trim();
+      return jsonText;
 
     } catch (e) {
       console.error(`Gemini API call attempt ${i + 1} failed:`, e);
+
+      if (e instanceof Error && e.message.includes('Rpc failed')) {
+          console.warn(`SDK call failed with RPC error on attempt ${i + 1}. Attempting fallback with public REST API.`);
+          try {
+              return await callGeminiWithFetch(prompt, schema, modelName);
+          } catch (fallbackError) {
+              console.error("Fallback API call also failed:", fallbackError);
+          }
+      }
       
       if (e instanceof Error && e.message.includes('The analysis was not completed successfully')) {
           throw e;
@@ -292,6 +344,7 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
       await new Promise(res => setTimeout(res, 1000 * (i + 1))); // Exponential backoff
     }
   }
+  throw new Error("API call failed after all retries.");
 }
 
 interface AnalyzeProjectParams {
@@ -328,10 +381,8 @@ export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName
         const isLibraryFile = libraryFiles.some(f => f.name === file.name);
         if (isLibraryFile) {
             finalAnalysis.libraryProject.push(fileAnalysisResult);
-            onProgress({ analysis: { libraryProject: [fileAnalysisResult] } });
         } else {
             finalAnalysis.frontendProject.push(fileAnalysisResult);
-            onProgress({ analysis: { frontendProject: [fileAnalysisResult] } });
         }
     }
 
@@ -344,150 +395,16 @@ export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName
     });
 
     if (totalFiles > 0) {
+        onProgress({ summary: 'Generating summary...' });
         const summaryPrompt = buildSummaryPrompt(finalAnalysis, language);
         const summary = await handleGeminiCallWithRetry(summaryPrompt, null, modelName, language) as string;
         finalAnalysis.overallSummary = summary;
-        onProgress({ summary });
     }
-
+    
     return finalAnalysis;
 }
 
-
-interface AskQuestionParams {
-  libraryFiles: UploadedFile[];
-  frontendFiles: UploadedFile[];
-  question: string;
-  chatSession?: Chat | null;
-  analysis?: Analysis | null;
-  modelName: ModelName;
-  language: Language;
-}
-
-function buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis, language }: Omit<AskQuestionParams, 'chatSession' | 'modelName'>): string {
-  const isRussian = language === 'ru';
-  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
-  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
-
-  let analysisContext = '';
-
-  if (analysis) {
-      const appliedFixes = [...analysis.libraryProject, ...analysis.frontendProject]
-        .flatMap(file => (file.recommendations || []).map(rec => ({ ...rec, fileName: file.fileName })))
-        .filter(rec => rec.appliedSuggestionIndex !== undefined);
-
-      if (appliedFixes.length > 0) {
-          const fixesList = appliedFixes.map(rec => 
-              isRussian 
-                ? `- В файле \`${rec.fileName}\`: "${rec.suggestions[rec.appliedSuggestionIndex!].title}"`
-                : `- In file \`${rec.fileName}\`: "${rec.suggestions[rec.appliedSuggestionIndex!].title}"`
-          ).join('\n');
-          
-          analysisContext = isRussian
-            ? `
-**КРИТИЧЕСКИ ВАЖНЫЙ КОНТЕКСТ:**
-Ты ранее провел анализ этого проекта. С тех пор пользователь **применил следующие исправления**:\n${fixesList}
-Код, который предоставлен ниже, является **АКТУАЛЬНОЙ ВЕРСИЕЙ**. Твой предыдущий анализ теперь частично устарел.
-Твоя задача — отвечать на вопросы, основываясь ИСКЛЮЧИТЕЛЬНО на **ТЕКУЩЕМ СОСТОЯНИИ КОДА**. Не ссылайся на рекомендации из старого анализа, которые уже были применены.
-`
-            : `
-**CRITICALLY IMPORTANT CONTEXT:**
-You previously analyzed this project. Since then, the user has **applied the following fixes**:\n${fixesList}
-The code provided below is the **CURRENT VERSION**. Your previous analysis is now partially outdated.
-Your task is to answer questions based ONLY on the **CURRENT STATE OF THE CODE**. Do not refer to recommendations from the old analysis that have already been applied.
-`;
-      } else {
-        analysisContext = isRussian
-            ? `
-**КОНТЕКСТ:**
-Ты уже провел анализ этого проекта. Вот его результаты. Используй их как основной контекст для ответов.
-<analysis_results>
-${JSON.stringify({ overallSummary: analysis.overallSummary, libraryProject: analysis.libraryProject, frontendProject: analysis.frontendProject }, null, 2)}
-</analysis_results>
-`
-            : `
-**CONTEXT:**
-You have already analyzed this project. Here are the results. Use them as the primary context for your answers.
-<analysis_results>
-${JSON.stringify({ overallSummary: analysis.overallSummary, libraryProject: analysis.libraryProject, frontendProject: analysis.frontendProject }, null, 2)}
-</analysis_results>
-`;
-      }
-  } else {
-    analysisContext = isRussian 
-        ? `Это начало нашего разговора. Я предоставляю тебе полный код проекта. Пожалуйста, проанализируй его и ответь на мой первый вопрос.`
-        : `This is the beginning of our conversation. I am providing you with the full project code. Please analyze it and answer my first question.`;
-  }
-  
-  const langInstruction = isRussian 
-    ? "You MUST respond exclusively in Russian. Format your responses using Markdown for readability.\n**Отвечай лаконично и по существу, если пользователь не просит предоставить больше деталей.**"
-    : "You MUST respond exclusively in English. Format your responses using Markdown for readability.\n**Answer concisely and to the point, unless the user asks for more details.**";
-  
-  const hasChangelog = hasChangelogFile(libraryFiles, frontendFiles);
-  const changelogNote = hasChangelog
-    ? (isRussian
-      ? "**ВАЖНОЕ ЗАМЕЧАНИЕ О ПОВЕДЕНИИ:** Когда пользователь применяет предложенное тобой исправление, ты автоматически пытаешься найти и обновить файл `CHANGELOG.md`, добавляя в него описание изменения. Если тебя спросят об этом процессе, ты ДОЛЖЕН подтвердить, что это автоматическая функция. Не говори пользователю, что ему нужно обновлять журнал изменений вручную."
-      : "**IMPORTANT BEHAVIOR NOTE:** When a user applies a fix you suggested, you will automatically attempt to find and update a `CHANGELOG.md` file with a summary of the change. When asked about this process, you MUST confirm that this is an automated feature. Do not tell the user they need to update the changelog manually.")
-    : "";
-
-  return `
-You are an expert Google Apps Script (GAS) developer and a helpful code assistant. Your memory of the project state is updated with each question.
-${changelogNote}
-
-${analysisContext}
-${langInstruction}
-
-**Here are the project files (this is their CURRENT state):**
-
-${librarySection}
-
-${frontendSection}
-
----
-
-**My question:**
-"${question}"
-`;
-}
-
-
-
-export async function askQuestionAboutCode({ libraryFiles, frontendFiles, question, chatSession, analysis, modelName, language }: AskQuestionParams): Promise<{ answer: string; chatSession: Chat }> {
-  const isRussian = language === 'ru';
-  try {
-    if (chatSession) {
-      const response = await chatSession.sendMessage({ message: question });
-      return { answer: response.text.trim(), chatSession };
-    } else {
-      const chat = ai.chats.create({ model: modelName });
-      const initialPrompt = buildInitialQuestionPrompt({ libraryFiles, frontendFiles, question, analysis, language });
-      const response = await chat.sendMessage({ message: initialPrompt });
-      return { answer: response.text.trim(), chatSession: chat };
-    }
-  } catch (e) {
-    console.error("Gemini API call for question failed:", e);
-    if (e instanceof Error) {
-        if (e.message.includes('429')) {
-             throw new Error(isRussian 
-                ? `Достигнут дневной лимит запросов к API Gemini (модель '${modelName}'). Пожалуйста, попробуйте снова завтра. Для снятия ограничений рассмотрите возможность перехода на тарифный план с оплатой по мере использования (Pay-as-you-go) в Google AI Studio.`
-                : `Daily request limit for Gemini API (model '${modelName}') has been reached. Please try again tomorrow. To lift these limits, consider upgrading to a Pay-as-you-go plan in Google AI Studio.`
-            );
-        }
-        if (e.message.includes('Rpc failed')) {
-            throw new Error(isRussian
-                ? "Не удалось подключиться к API Gemini. Это может быть связано с сетевыми ограничениями в вашей среде. Убедитесь, что у вас есть прямое подключение к generativelanguage.googleapis.com."
-                : "Failed to connect to the Gemini API. This may be due to network restrictions in your environment. Ensure you have a direct connection to generativelanguage.googleapis.com."
-            );
-        }
-    }
-    throw new Error(isRussian
-        ? `Произошла неизвестная ошибка при вызове API: ${e instanceof Error ? e.message : String(e)}`
-        : `An unknown error occurred during an API call: ${e instanceof Error ? e.message : String(e)}`
-    );
-  }
-}
-
-interface RefactorCodeParams {
+interface RefactorParams {
   code: string;
   instruction: string;
   fileName: string;
@@ -497,236 +414,288 @@ interface RefactorCodeParams {
   language: Language;
 }
 
-export async function refactorCode({ code, instruction, fileName, libraryFiles, frontendFiles, modelName, language }: RefactorCodeParams): Promise<RefactorResult> {
+export async function refactorCode({ code, instruction, fileName, libraryFiles, frontendFiles, modelName, language }: RefactorParams): Promise<RefactorResult> {
   const isRussian = language === 'ru';
-  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
-  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
-  
-  const langInstruction = isRussian
-    ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, and manual steps, must be in Russian."
-    : "You MUST respond exclusively in English. All text, including descriptions, titles, and manual steps, must be in English.";
+  const allFilesContext = 
+    createProjectSection('Library Project Files', libraryFiles) + '\n' +
+    createProjectSection('Frontend Project Files', frontendFiles);
 
-  const changelogInstruction = isRussian 
-    ? `**КРИТИЧЕСКИ ВАЖНОЕ ЗАМЕЧАНИЕ О CHANGELOG:**
-Вы НЕ ДОЛЖНЫ изменять или создавать файл CHANGELOG.md. Не включайте в свой ответ никаких изменений для файла с именем 'CHANGELOG.md'. Приложение обрабатывает обновления журнала изменений отдельно. Ваша единственная обязанность — предоставить изменения кода для исходных файлов (.gs, .js, .html и т. д.).`
-    : `**CRITICAL NOTE ON CHANGELOG:**
-You MUST NOT modify or create a CHANGELOG.md file. Do not include any changes for a file named 'CHANGELOG.md' in your response. The application handles changelog updates separately. Your sole responsibility is to provide the code changes for the actual source files (.gs, .js, .html, etc.).`;
-
+  const langInstruction = isRussian 
+    ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, and suggestions, must be in Russian."
+    : "You MUST respond exclusively in English. All text, including descriptions, titles, and suggestions, must be in English.";
+    
   const prompt = `
-You are an expert Google Apps Script (GAS) developer specializing in context-aware code refactoring.
-Your task is to refactor a specific code snippet based on the provided instruction and return a structured JSON object detailing all necessary changes. 
+You are an expert Google Apps Script (GAS) developer specializing in code refactoring.
 ${langInstruction}
 
-**Instruction for refactoring:**
-${instruction}
+**Task:**
+Apply the following instruction to the provided code snippet from the file \`${fileName}\`.
+Your goal is to not only correct the main snippet but also to identify and provide corrections for any related code in other project files that would be affected by this change (e.g., function calls that need updating).
 
----
+**Full Project Context:**
+${allFilesContext}
+
+**File to Refactor:** \`${fileName}\`
 
 **Original Code Snippet to Refactor:**
-This is the specific code you must change, located in the file \`${fileName}\`.
-\`\`\`javascript
+\`\`\`
 ${code}
 \`\`\`
 
----
+**Instruction:**
+${instruction}
 
-**Full Project Context:**
-Use these files to understand how the code snippet is used and to ensure your refactoring does not break other parts of the project.
-${librarySection}
-${frontendSection}
-
----
-
-${changelogInstruction}
-
----
-
-**Your Task & JSON Output:**
-1.  **Refactor the Main Snippet:** Create the corrected version of the code snippet for the 'mainChange'. The \`originalCodeSnippet\` for the main change should be the one provided to you above.
-2.  **Analyze Project-Wide Impact:** Based on the full context, identify ALL other files and code snippets that need to be updated as a direct consequence of the main change. These are the 'relatedChanges'.
-3.  **Provide Snippets for All Changes:** For every main and related change, you MUST provide the \`originalCodeSnippet\` to be replaced and the new, \`correctedCodeSnippet\`.
-    - **CRITICAL:** The \`fileName\` for every change MUST exactly match one of the files provided in the 'Full Project Context'.
-    - **CRITICAL:** The \`fileName\` must be the base name of the file ONLY (e.g., \`Code.gs\`, \`utils.js\`). It MUST NOT include any prefixes, paths, or section titles (e.g., DO NOT use \`Основной проект/Code.gs\` or \`Frontend/utils.js\`).
-    - **CRITICAL:** The \`originalCodeSnippet\` for every change MUST be a complete, self-contained block of code.
-    - **CRITICAL:** It MUST be an **exact, verbatim, character-for-character copy** of the code from the source file, including all whitespace, indentation, and comments.
-    - **CRITICAL:** This is the most common point of failure. Do not hallucinate or modify the \`originalCodeSnippet\` in any way. It must be a direct copy from the files provided in the context. This is critical for the replacement logic to work.
-4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
-5.  **Identify Manual Follow-up Actions:** Critically, determine if the automated code change requires the user to perform any manual actions *outside* of the code editor to make the application functional. Examples include:
-    *   Setting a Script Property in the GAS project settings.
-    *   Creating or updating a specific named range in a Google Sheet.
-    *   Adding a specific value to a configuration sheet.
-    *   Manually authorizing a new OAuth scope.
-6.  **Populate 'manualSteps':** If any such actions are required, populate the \`manualSteps\` array with clear, step-by-step instructions. If no manual steps are needed, this array MUST be empty.
+**Output Requirements:**
+-   **CRITICAL:** The \`originalCodeSnippet\` in your response (for both main and related changes) MUST be an **exact, character-for-character match** of a snippet from the user's provided files. It must be a complete, self-contained block (like a full function).
+-   If the change in one file requires changes in another (e.g., renaming a function means updating all calls to it), list these as 'relatedChanges'.
+-   If the user must perform an action outside of the code editor (e.g., update a spreadsheet, set a script property), list these as 'manualSteps'. Provide clear, step-by-step instructions. If no manual steps are needed, return an empty array.
+-   Provide your response in the specified JSON format. Do not include any text or markdown outside of the JSON structure.
 `;
   const { refactorSchema } = getSchemas(language);
-  return handleGeminiCallWithRetry(prompt, refactorSchema, modelName, language);
+  return await handleGeminiCallWithRetry(prompt, refactorSchema, modelName, language) as RefactorResult;
+}
+
+interface UpdateChangelogParams {
+    currentChangelog: string;
+    changeDescription: string;
+    modelName: ModelName;
+    language: Language;
+}
+
+export async function updateChangelog({ currentChangelog, changeDescription, modelName, language }: UpdateChangelogParams): Promise<string> {
+  const isRussian = language === 'ru';
+  const langInstruction = isRussian ? "Ответь на русском." : "Answer in English.";
+  const prompt = `
+You are an expert in maintaining changelogs according to the "Keep a Changelog" format.
+Your task is to add a new entry under the "[Unreleased]" section of the provided CHANGELOG.md file.
+
+**Instructions:**
+1.  Locate the \`## [Unreleased]\` section.
+2.  Add a new "### Fixed" or "### Changed" subsection if it doesn't exist.
+3.  Add the new change description as a new line item.
+4.  Do not modify any other part of the file.
+5.  Return the **entire, updated content** of the CHANGELOG.md file.
+
+**Current CHANGELOG.md content:**
+\`\`\`markdown
+${currentChangelog}
+\`\`\`
+
+**New change to add:**
+- ${changeDescription}
+
+${langInstruction}
+`;
+
+  return await handleGeminiCallWithRetry(prompt, null, modelName, language) as string;
+}
+
+interface BatchRefactorParams {
+    instructions: BatchInstruction[];
+    libraryFiles: UploadedFile[];
+    frontendFiles: UploadedFile[];
+    modelName: ModelName;
+    language: Language;
+}
+
+export async function batchRefactorCode({ instructions, libraryFiles, frontendFiles, modelName, language }: BatchRefactorParams): Promise<BatchRefactorResult> {
+    const isRussian = language === 'ru';
+    const allFilesContext = 
+        createProjectSection('Library Project Files', libraryFiles) + '\n' +
+        createProjectSection('Frontend Project Files', frontendFiles);
+
+    const formattedInstructions = instructions.map(instr => `
+---
+**File:** \`${instr.fileName}\`
+**Instruction:** ${instr.instruction}
+**Original Code Snippet:**
+\`\`\`
+${instr.code}
+\`\`\`
+---
+`).join('\n');
+
+    const langInstruction = isRussian 
+    ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, and suggestions, must be in Russian."
+    : "You MUST respond exclusively in English. All text, including descriptions, titles, and suggestions, must be in English.";
+
+    const prompt = `
+You are an expert Google Apps Script (GAS) developer tasked with performing a batch refactoring operation on a project.
+${langInstruction}
+
+**Task:**
+Apply all the instructions listed below. Consolidate all required code modifications into a single list of changes and all required manual actions into a single list of unique manual steps.
+
+**Full Project Context:**
+${allFilesContext}
+
+**Batch Instructions:**
+${formattedInstructions}
+
+**Output Requirements:**
+-   **Consolidate Changes:** Produce a single, flat list of all code changes across all files.
+-   **CRITICAL:** The \`originalCodeSnippet\` in your response MUST be an **exact, character-for-character match** of a snippet from the user's provided files.
+-   **Consolidate Manual Steps:** Produce a single, de-duplicated list of all manual steps required after all code changes are applied.
+-   Provide your response in the specified JSON format. Do not include any text or markdown outside of the JSON structure.
+`;
+    const { batchRefactorSchema } = getSchemas(language);
+    return await handleGeminiCallWithRetry(prompt, batchRefactorSchema, modelName, language) as BatchRefactorResult;
 }
 
 interface CorrectRefactorParams {
-  originalResult: RefactorResult;
-  failedChanges: FailedChange[];
-  libraryFiles: UploadedFile[];
-  frontendFiles: UploadedFile[];
-  instruction: string;
-  modelName: ModelName;
-  language: Language;
+    originalResult: RefactorResult;
+    failedChanges: FailedChange[];
+    instruction: string;
+    libraryFiles: UploadedFile[];
+    frontendFiles: UploadedFile[];
+    modelName: ModelName;
+    language: Language;
 }
 
-export async function correctRefactorResult({ failedChanges, libraryFiles, frontendFiles, instruction, modelName, language }: CorrectRefactorParams): Promise<RefactorResult> {
-  const isRussian = language === 'ru';
-  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
-  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
+export async function correctRefactorResult({ originalResult, failedChanges, instruction, libraryFiles, frontendFiles, modelName, language }: CorrectRefactorParams): Promise<RefactorResult> {
+    const isRussian = language === 'ru';
+    const langInstruction = isRussian 
+        ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, and suggestions, must be in Russian."
+        : "You MUST respond exclusively in English. All text, including descriptions, titles, and suggestions, must be in English.";
 
-  const failedSnippetsText = failedChanges
-    .map(f => isRussian 
-        ? `- В файле \`${f.change.fileName}\`, не удалось найти следующий фрагмент:\n\`\`\`\n${f.change.originalCodeSnippet}\n\`\`\``
-        : `- In file \`${f.change.fileName}\`, the following snippet was not found:\n\`\`\`\n${f.change.originalCodeSnippet}\n\`\`\``
-    ).join('\n');
-    
-  const langInstruction = isRussian
-    ? "Your task is to try again and fix your mistake. You MUST respond exclusively in Russian."
-    : "Your task is to try again and fix your mistake. You MUST respond exclusively in English.";
+    const allFilesContext = 
+        createProjectSection('Library Project Files', libraryFiles) + '\n' +
+        createProjectSection('Frontend Project Files', frontendFiles);
 
-  const prompt = `
-You are a self-correcting AI assistant for Google Apps Script. Your previous attempt to refactor code failed because you provided incorrect \`originalCodeSnippet\` values that were not found in the source files. ${langInstruction}
+    const failedChangesDescription = failedChanges.map(f => `- In file \`${f.change.fileName}\`, the snippet \`\`\`${f.change.originalCodeSnippet}\`\`\` was not found.`).join('\n');
 
-**Original Refactoring Goal:**
+    const prompt = `
+You are a self-correcting AI assistant. Your previous attempt to refactor code failed because you used an incorrect \`originalCodeSnippet\` that could not be found in the user's files.
+${langInstruction}
+
+**Your Task:**
+Re-generate the refactoring plan, but this time, you **MUST** find the correct, exact code snippets from the full project context provided below to use as the \`originalCodeSnippet\` for each change.
+
+**Original Failed Attempt (for context):**
+\`\`\`json
+${JSON.stringify(originalResult, null, 2)}
+\`\`\`
+
+**Reason for Failure:**
+The following snippets were not found:
+${failedChangesDescription}
+
+**Original High-Level Instruction:**
 ${instruction}
 
----
+**Full, Correct Project Context:**
+${allFilesContext}
 
-**Your Previous Incorrect Snippets:**
-You made mistakes in the following snippets. The user's code does not contain them exactly as you wrote them.
-${failedSnippetsText}
-
----
-
-**Full Project Context (The user's current code):**
-${librarySection}
-${frontendSection}
-
----
-
-**CRITICAL INSTRUCTIONS FOR YOUR SECOND ATTEMPT:**
-1.  **Re-analyze the Goal:** Carefully re-read the original refactoring goal.
-2.  **Generate a New Plan:** Create a new, complete refactoring plan. Do not just fix the broken parts; regenerate the entire plan to ensure consistency.
-3.  **FIX THE SNIPPETS AND FILE NAMES:** The most important task is to fix your previous mistake. Your previous attempt may have failed because you provided incorrect \`originalCodeSnippet\` values or invented file names that do not exist.
-    - In your new plan, the \`fileName\` for every change **MUST** exactly match one of the files provided in the 'Full Project Context'.
-    - **CRITICAL:** The \`fileName\` must be the base name of the file ONLY (e.g., \`Code.gs\`, \`utils.js\`). It MUST NOT include any prefixes, paths, or section titles (e.g., DO NOT use \`Основной проект/Code.gs\` or \`Frontend/utils.js\`).
-    - The \`originalCodeSnippet\` for every change **MUST** be a perfect, verbatim, character-for-character copy from the project files provided above. Check indentation, comments, and whitespace. This is the only way the automated tool can apply your changes.
-4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
+**Correction Instructions:**
+1.  Re-read the **Original High-Level Instruction**.
+2.  Carefully examine the **Full, Correct Project Context** to find the actual code that needs to be changed.
+3.  Generate a new, corrected refactoring plan.
+4.  **CRITICAL:** Ensure every \`originalCodeSnippet\` in your new response is an **exact, character-for-character copy** from the provided project files.
+5.  Provide your response in the specified JSON format.
 `;
-  const { refactorSchema } = getSchemas(language);
-  return handleGeminiCallWithRetry(prompt, refactorSchema, modelName, language);
+    const { refactorSchema } = getSchemas(language);
+    return await handleGeminiCallWithRetry(prompt, refactorSchema, modelName, language) as RefactorResult;
 }
 
+interface AskQuestionParams {
+    libraryFiles: UploadedFile[];
+    frontendFiles: UploadedFile[];
+    question: string;
+    chatSession: Chat | null;
+    analysis: Analysis | null;
+    modelName: ModelName;
+    language: Language;
+    conversationHistory: ConversationTurn[];
+}
 
-export async function batchRefactorCode({ instructions, libraryFiles, frontendFiles, modelName, language }: { instructions: BatchInstruction[], libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], modelName: ModelName, language: Language }): Promise<BatchRefactorResult> {
-  const isRussian = language === 'ru';
-  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
-  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
-  
-  const langInstruction = isRussian
-    ? "You MUST respond exclusively in Russian."
-    : "You MUST respond exclusively in English.";
+function buildChatFallbackPrompt(params: AskQuestionParams): string {
+    const { libraryFiles, frontendFiles, question, analysis, language, conversationHistory } = params;
+    const isRussian = language === 'ru';
+    const langInstruction = isRussian 
+        ? "You MUST respond exclusively in Russian."
+        : "You MUST respond exclusively in English.";
 
-  const instructionsText = instructions.map((instr, index) => `
-    **Task ${index + 1}:**
-    - **File:** \`${instr.fileName}\`
-    - **Instruction:** ${instr.instruction}
-    - **Original Code Snippet to Refactor:**
-      \`\`\`
-      ${instr.code}
-      \`\`\`
-  `).join('\n---\n');
-  
-  const changelogInstruction = isRussian 
-    ? `**КРИТИЧЕСКИ ВАЖНОЕ ЗАМЕЧАНИЕ О CHANGELOG:**
-Вы НЕ ДОЛЖНЫ изменять или создавать файл CHANGELOG.md. Не включайте в свой ответ никаких изменений для файла с именем 'CHANGELOG.md'. Приложение обрабатывает обновления журнала изменений отдельно. Ваша единственная обязанность — предоставить изменения кода для исходных файлов (.gs, .js, .html и т. д.).`
-    : `**CRITICAL NOTE ON CHANGELOG:**
-You MUST NOT modify or create a CHANGELOG.md file. Do not include any changes for a file named 'CHANGELOG.md' in your response. The application handles changelog updates separately. Your sole responsibility is to provide the code changes for the actual source files (.gs, .js, .html, etc.).`;
+    let historyText = "";
+    if (conversationHistory && conversationHistory.length > 0) {
+        historyText = "Here is the previous conversation history for context:\n" + conversationHistory.map(turn => 
+            `User: ${turn.question}\nAssistant: ${turn.answer}`
+        ).join('\n\n');
+    }
 
-  const prompt = `
-You are an expert Google Apps Script (GAS) developer specializing in context-aware, batch code refactoring.
-Your task is to perform multiple refactoring tasks across the entire project simultaneously. You will receive a list of tasks. You must analyze their combined impact and produce a single, consolidated list of changes in a JSON object.
+    const libraryProjectSection = createProjectSection('Library Project Files', libraryFiles);
+    const frontendProjectSection = createProjectSection('Frontend Project Files', frontendFiles);
+    const analysisSection = analysis ? `## Previous Code Analysis Summary\n\n${analysis.overallSummary}` : '';
+
+    return `
+You are an intelligent Google Apps Script (GAS) code assistant. Your task is to answer a user's question about their project.
 ${langInstruction}
 
-**Full Project Context:**
-${librarySection}
-${frontendSection}
+**Project Context:**
+The user has provided the following project files.
 
----
+${libraryProjectSection}
+${frontendProjectSection}
+${analysisSection}
 
-**Refactoring Tasks:**
-You must perform all of the following tasks. Consider how they might interact with each other.
-${instructionsText}
+**Conversation History:**
+${historyText}
 
----
+**User's New Question:**
+${question}
 
-${changelogInstruction}
-
----
-
-**Your Task & JSON Output:**
-1.  **Consolidate All Changes:** Analyze all tasks and their project-wide impact. Generate a single, flat list of all unique code changes required. Each change object in the 'changes' array must contain the file name, a description, the exact original code snippet, and the corrected code snippet.
-2.  **Ensure Exact Snippets and File Names:** For each change, the \`originalCodeSnippet\` and \`fileName\` are the most critical parts.
-    - **CRITICAL:** The \`fileName\` for every change MUST exactly match one of the files provided in the 'Full Project Context'.
-    - **CRITICAL:** The \`fileName\` must be the base name of the file ONLY (e.g., \`Code.gs\`, \`utils.js\`). It MUST NOT include any prefixes, paths, or section titles (e.g., DO NOT use \`Основной проект/Code.gs\` or \`Frontend/utils.js\`).
-    - **CRITICAL:** The \`originalCodeSnippet\` MUST be a complete, self-contained block of code.
-    - **CRITICAL:** It MUST be an **exact, verbatim, character-for-character copy** from the source files. Do not change indentation, whitespace, or comments.
-    - **CRITICAL:** You must not invent or modify the \`originalCodeSnippet\`. It is only used to find and replace code. An incorrect snippet will cause the entire process to fail.
-3.  **Consolidate Manual Steps:** Review all changes and create a consolidated, de-duplicated list of any manual follow-up actions required.
-4.  **Format as JSON:** Return a single JSON object matching the provided schema. Do not include any text outside the JSON structure.
+Based on all the provided context (project files, analysis summary, and conversation history), provide a comprehensive and helpful answer to the user's question. Format your response using Markdown.
 `;
-  const { batchRefactorSchema } = getSchemas(language);
-  return handleGeminiCallWithRetry(prompt, batchRefactorSchema, modelName, language);
 }
 
 
-function buildChangelogPrompt(currentChangelog: string, changeDescription: string, language: Language): string {
-  const langInstruction = language === 'en' 
-    ? "You MUST respond exclusively in English. All changelog entries must be in English."
-    : "You MUST respond exclusively in Russian. Все записи в журнале изменений должны быть на русском языке.";
+export async function askQuestionAboutCode(params: AskQuestionParams): Promise<{ answer: string, chatSession: Chat | null }> {
+    const { question, chatSession, modelName, language, conversationHistory } = params;
+    const isRussian = language === 'ru';
 
-  return `
-You are a software engineer's assistant specializing in maintaining changelogs.
-Your task is to update the provided CHANGELOG.md file content based on a description of a recent code change.
-You MUST adhere strictly to the "Keep a Changelog" format.
-${langInstruction}
+    let prompt;
+    if (conversationHistory.length <= 1) { // First question
+        const libraryProjectSection = createProjectSection('Library Project Files', params.libraryFiles);
+        const frontendProjectSection = createProjectSection('Frontend Project Files', params.frontendFiles);
+        const analysisSection = params.analysis ? `## Previous Code Analysis Summary\n\n${params.analysis.overallSummary}` : '';
+        const langInstruction = isRussian ? "Отвечай на русском." : "Answer in English.";
+        prompt = `Context:\n${libraryProjectSection}\n${frontendProjectSection}\n${analysisSection}\n\nMy question is: ${question}\n\n${langInstruction}`;
+    } else {
+        prompt = question;
+    }
+    
+    let currentChat = chatSession;
 
-**RULES:**
-1.  Find the \`## [Unreleased]\` section. If it doesn't exist, create it at the top, below the header and any existing links.
-2.  Infer the type of change from the description (e.g., 'Fixed', 'Changed', 'Added', 'Removed'). Create the appropriate subsection (e.g., \`### Fixed\`) under \`[Unreleased]\` if it's not already there. The subsections must be ordered: Added, Changed, Deprecated, Removed, Fixed, Security.
-3.  Add the provided change description as a new bullet point under the appropriate subsection. Rephrase it if needed to fit the changelog style, but keep the core information.
-4.  Maintain the existing structure and content of the file perfectly. Preserve all links, headers, and existing entries.
-5.  Return ONLY the full, updated content of the changelog file. Do not add any extra text, explanations, or markdown formatting like \`\`\`markdown.
+    try {
+        if (!currentChat) {
+             const history = conversationHistory.slice(0, -1).map(turn => ([
+                { role: 'user' as const, parts: [{ text: turn.question }] },
+                { role: 'model' as const, parts: [{ text: turn.answer }] }
+            ])).flat();
 
----
-**Current CHANGELOG.md Content:**
----
-${currentChangelog}
----
-**Description of Change to Add:**
----
-- ${changeDescription}
----
+            currentChat = ai.chats.create({ 
+                model: modelName, 
+                history
+            });
+        }
+        
+        const response = await currentChat.sendMessage(prompt);
+        return { answer: response.text, chatSession: currentChat };
 
-Now, provide the full updated CHANGELOG.md content.`;
-}
+    } catch (e) {
+        if (e instanceof Error && (e.message.includes('Rpc failed') || e.message.includes('API key not valid'))) {
+            console.warn(`Chat SDK call failed (${e.message}). Using stateless public API fallback.`);
+            
+            const fallbackPrompt = buildChatFallbackPrompt(params);
+            
+            // Use the fetch-based fallback directly for chat
+            const answer = await callGeminiWithFetch(fallbackPrompt, null, modelName) as string;
 
-export async function updateChangelog({ currentChangelog, changeDescription, language, modelName }: { currentChangelog: string, changeDescription: string, language: Language, modelName: ModelName }): Promise<string> {
-  const prompt = buildChangelogPrompt(currentChangelog, changeDescription, language);
-  
-  let text = await handleGeminiCallWithRetry(prompt, null, modelName, language) as string;
-  
-  if (text.startsWith('```markdown')) {
-      text = text.substring('```markdown'.length);
-  }
-  if (text.startsWith('```')) {
-      text = text.substring(3);
-  }
-  if (text.endsWith('```')) {
-      text = text.substring(0, text.length - 3);
-  }
-  return text.trim();
+            // Invalidate the SDK session to ensure we use the fallback next time too if the network issue persists.
+            return { answer, chatSession: null };
+        }
+        
+        console.error(e);
+        const errorMessage = e instanceof Error ? e.message : (isRussian ? 'Произошла неизвестная ошибка при обработке вопроса.' : 'An unknown error occurred while processing the question.');
+        throw new Error(errorMessage);
+    }
 }

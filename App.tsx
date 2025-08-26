@@ -1,5 +1,7 @@
 
 
+
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult, FailedChange, ModelName, ProgressUpdate } from './types';
 import FileUpload from './components/FileUpload';
@@ -215,27 +217,35 @@ export default function App(): React.ReactNode {
     setError(null);
     setNotification(null);
     setActiveTab('chat');
+    
+    const currentQuestion = userQuestion;
+    setUserQuestion('');
+    const currentConversation = [...conversationHistory, { question: currentQuestion, answer: '' }];
+    setConversationHistory(currentConversation);
+
 
     try {
       const { answer, chatSession: newChatSession } = await askQuestionAboutCode({ 
         libraryFiles, 
         frontendFiles,
-        question: userQuestion,
+        question: currentQuestion,
         chatSession: chatSessionRef.current,
         analysis: analysisResult,
         modelName,
         language,
+        conversationHistory
       });
-      setConversationHistory(prev => [...prev, { question: userQuestion, answer }]);
+      setConversationHistory(prev => prev.map((turn, index) => index === prev.length - 1 ? { ...turn, answer } : turn));
       chatSessionRef.current = newChatSession;
-      setUserQuestion('');
     } catch (e) {
       console.error(e);
-      setError(e instanceof Error ? e.message : t('questionUnknownError'));
+      const errorMessage = e instanceof Error ? e.message : t('questionUnknownError');
+      setError(errorMessage);
+      setConversationHistory(prev => prev.slice(0, -1));
     } finally {
       setIsAnswering(false);
     }
-  }, [libraryFiles, frontendFiles, userQuestion, analysisResult, modelName, language, t]);
+  }, [libraryFiles, frontendFiles, userQuestion, analysisResult, modelName, language, conversationHistory, t]);
 
 
   const handleApplyFix = useCallback(async ({ fileName, recommendation, recIndex, suggestionIndex }: { fileName: string; recommendation: Recommendation, recIndex: number, suggestionIndex: number }) => {
@@ -726,7 +736,7 @@ export default function App(): React.ReactNode {
                         className="w-full flex-grow bg-indigo-600 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                         {isAnalyzing && (
-                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
@@ -751,7 +761,6 @@ export default function App(): React.ReactNode {
                         className="bg-gray-700 border-gray-600 rounded-md p-1.5 text-white text-xs focus:ring-indigo-500 focus:border-indigo-500"
                     >
                         <option value="gemini-2.5-flash">{t('flashModel')}</option>
-                        <option value="gemini-2.5-pro">{t('proModel')}</option>
                     </select>
                 </div>
               </div>
