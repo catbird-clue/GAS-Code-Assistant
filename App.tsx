@@ -1,7 +1,7 @@
 
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult, FailedChange, ModelName } from './types';
+import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult, FailedChange, ModelName, ProgressUpdate } from './types';
 import FileUpload from './components/FileUpload';
 import AnalysisResult from './components/AnalysisResult';
 import ChatView from './components/ChatView';
@@ -19,6 +19,13 @@ interface UndoState {
   analysisResult: Analysis | null;
 }
 
+interface AnalysisProgress {
+  completed: number;
+  total: number;
+  currentFile: string;
+  isGeneratingSummary: boolean;
+}
+
 const MAX_UNDO_STACK_SIZE = 10;
 
 export default function App(): React.ReactNode {
@@ -28,6 +35,7 @@ export default function App(): React.ReactNode {
 
   const [analysisResult, setAnalysisResult] = useState<Analysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [analysisProgress, setAnalysisProgress] = useState<AnalysisProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
   const [analysisStats, setAnalysisStats] = useState<AnalysisStats | null>(null);
@@ -69,6 +77,7 @@ export default function App(): React.ReactNode {
     setNotification(null);
     setUndoStack([]);
     setSelectedFixes({});
+    setAnalysisProgress(null);
   };
 
   const handleLibraryFilesUploaded = (uploadedFiles: UploadedFile[]) => {
@@ -130,14 +139,39 @@ export default function App(): React.ReactNode {
     setUndoStack([]);
 
     const startTime = new Date();
-    const totalLines = [...libraryFiles, ...frontendFiles].reduce((acc, file) => acc + (file.content ? file.content.split('\n').length : 0), 0);
+    const allFiles = [...libraryFiles, ...frontendFiles];
+    const totalLines = allFiles.reduce((acc, file) => acc + (file.content ? file.content.split('\n').length : 0), 0);
+
+    const handleProgress = (update: ProgressUpdate) => {
+      if (update.progress) {
+        setAnalysisProgress(prev => ({ ...prev, ...update.progress, isGeneratingSummary: false }));
+      }
+      // Do not update analysis results progressively anymore.
+      // The full result will be set once the entire analysis is complete.
+      if (update.summary) {
+        setAnalysisProgress(prev => ({ ...prev!, isGeneratingSummary: true }));
+      }
+    };
 
     try {
-      const result = await analyzeGasProject({ libraryFiles, frontendFiles, modelName, language });
+      setAnalysisProgress({
+        completed: 0,
+        total: allFiles.length,
+        currentFile: allFiles[0]?.name || '',
+        isGeneratingSummary: false,
+      });
+
+      const result = await analyzeGasProject({
+        libraryFiles,
+        frontendFiles,
+        modelName,
+        language,
+        onProgress: handleProgress
+      });
       setAnalysisResult(result);
       
       const endTime = new Date();
-      const duration = (endTime.getTime() - startTime.getTime()) / 1000; // in seconds
+      const duration = (endTime.getTime() - startTime.getTime()) / 1000;
       const analysisRate = duration > 0 ? Math.round((totalLines / duration) * 60) : 0;
       
       setAnalysisStats({
@@ -153,6 +187,7 @@ export default function App(): React.ReactNode {
       setError(e instanceof Error ? e.message : t('analysisUnknownError'));
     } finally {
       setIsAnalyzing(false);
+      setAnalysisProgress(null);
     }
   }, [libraryFiles, frontendFiles, modelName, language, t]);
 
@@ -679,12 +714,12 @@ export default function App(): React.ReactNode {
                         className="w-full flex-grow bg-indigo-600 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                         {isAnalyzing && (
-                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
                         )}
-                        {analysisResult ? t('reanalyze') : t('analyze')}
+                        {analysisResult && !isAnalyzing ? t('reanalyze') : t('analyze')}
                     </button>
                     <button
                         onClick={handleTestProject}
@@ -734,7 +769,8 @@ export default function App(): React.ReactNode {
                 {activeTab === 'analysis' ? (
                     <AnalysisResult 
                         analysis={analysisResult} 
-                        isLoading={isAnalyzing} 
+                        isLoading={isAnalyzing}
+                        analysisProgress={analysisProgress}
                         hasFiles={libraryFiles.length > 0 || frontendFiles.length > 0} 
                         onApplyFix={handleApplyFix}
                         notification={notification}

@@ -1,7 +1,7 @@
 
 
 import { GoogleGenAI, Type, Chat } from "@google/genai";
-import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation, FailedChange, ModelName } from '../types';
+import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation, FailedChange, ModelName, FileAnalysis, ProgressUpdate } from '../types';
 import { Language } from "../I18nContext";
 
 const API_KEY = process.env.API_KEY;
@@ -28,6 +28,41 @@ const createProjectSection = (title: string, files: UploadedFile[]): string => {
 
 const getSchemas = (language: Language) => {
     const isRussian = language === 'ru';
+
+    const recommendationSchemaItem = {
+        type: Type.OBJECT,
+        properties: {
+          description: { type: Type.STRING, description: isRussian ? "Общее описание проблемы." : "A general description of the issue." },
+          originalCodeSnippet: { type: Type.STRING, description: isRussian ? "Оригинальный фрагмент кода, который нужно исправить. Null, если не применимо." : "The original code snippet to be fixed. Null if not applicable." },
+          suggestions: {
+            type: Type.ARRAY,
+            description: isRussian ? "Список из одного или нескольких предлагаемых исправлений проблемы." : "A list of one or more suggested fixes for the issue.",
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING, description: isRussian ? "Короткий, понятный заголовок для этого конкретного исправления. Например, 'Использовать PropertiesService'." : "A short, clear title for this specific fix. E.g., 'Use PropertiesService'." },
+                description: { type: Type.STRING, description: isRussian ? "Подробное объяснение этого конкретного предлагаемого подхода." : "A detailed explanation of this specific suggested approach." },
+                correctedCodeSnippet: { type: Type.STRING, description: isRussian ? "Исправленный фрагмент кода для этого конкретного предложения." : "The corrected code snippet for this specific suggestion." },
+              },
+              required: ['title', 'description', 'correctedCodeSnippet']
+            }
+          }
+        },
+        required: ['description', 'originalCodeSnippet', 'suggestions']
+      };
+
+    const fileAnalysisSchema = {
+        type: Type.OBJECT,
+        properties: {
+            fileName: { type: Type.STRING, description: isRussian ? "Имя файла." : "The file name." },
+            recommendations: {
+            type: Type.ARRAY,
+            description: isRussian ? "Список рекомендаций для этого файла." : "A list of recommendations for this file.",
+            items: recommendationSchemaItem
+            }
+        },
+        required: ['fileName', 'recommendations']
+    };
     
     const analysisSchema = {
       type: Type.OBJECT,
@@ -35,74 +70,12 @@ const getSchemas = (language: Language) => {
         libraryProject: {
           type: Type.ARRAY,
           description: isRussian ? "Анализ для каждого файла в проекте-библиотеке." : "Analysis for each file in the library project.",
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              fileName: { type: Type.STRING, description: isRussian ? "Имя файла." : "The file name." },
-              recommendations: {
-                type: Type.ARRAY,
-                description: isRussian ? "Список рекомендаций для этого файла." : "A list of recommendations for this file.",
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    description: { type: Type.STRING, description: isRussian ? "Общее описание проблемы." : "A general description of the issue." },
-                    originalCodeSnippet: { type: Type.STRING, description: isRussian ? "Оригинальный фрагмент кода, который нужно исправить. Null, если не применимо." : "The original code snippet to be fixed. Null if not applicable." },
-                    suggestions: {
-                      type: Type.ARRAY,
-                      description: isRussian ? "Список из одного или нескольких предлагаемых исправлений проблемы." : "A list of one or more suggested fixes for the issue.",
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          title: { type: Type.STRING, description: isRussian ? "Короткий, понятный заголовок для этого конкретного исправления. Например, 'Использовать PropertiesService'." : "A short, clear title for this specific fix. E.g., 'Use PropertiesService'." },
-                          description: { type: Type.STRING, description: isRussian ? "Подробное объяснение этого конкретного предлагаемого подхода." : "A detailed explanation of this specific suggested approach." },
-                          correctedCodeSnippet: { type: Type.STRING, description: isRussian ? "Исправленный фрагмент кода для этого конкретного предложения." : "The corrected code snippet for this specific suggestion." },
-                        },
-                        required: ['title', 'description', 'correctedCodeSnippet']
-                      }
-                    }
-                  },
-                  required: ['description', 'originalCodeSnippet', 'suggestions']
-                }
-              }
-            },
-            required: ['fileName', 'recommendations']
-          }
+          items: fileAnalysisSchema
         },
         frontendProject: {
           type: Type.ARRAY,
           description: isRussian ? "Анализ для каждого файла во фронтенд-проекте." : "Analysis for each file in the frontend project.",
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              fileName: { type: Type.STRING, description: isRussian ? "Имя файла." : "The file name." },
-              recommendations: {
-                type: Type.ARRAY,
-                description: isRussian ? "Список рекомендаций для этого файла." : "A list of recommendations for this file.",
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    description: { type: Type.STRING, description: isRussian ? "Общее описание проблемы." : "A general description of the issue." },
-                    originalCodeSnippet: { type: Type.STRING, description: isRussian ? "Оригинальный фрагмент кода, который нужно исправить. Null, если не применимо." : "The original code snippet to be fixed. Null if not applicable." },
-                    suggestions: {
-                      type: Type.ARRAY,
-                      description: isRussian ? "Список из одного или нескольких предлагаемых исправлений проблемы." : "A list of one or more suggested fixes for the issue.",
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          title: { type: Type.STRING, description: isRussian ? "Короткий, понятный заголовок для этого конкретного исправления. Например, 'Использовать PropertiesService'." : "A short, clear title for this specific fix. E.g., 'Use PropertiesService'." },
-                          description: { type: Type.STRING, description: isRussian ? "Подробное объяснение этого конкретного предлагаемого подхода." : "A detailed explanation of this specific suggested approach." },
-                          correctedCodeSnippet: { type: Type.STRING, description: isRussian ? "Исправленный фрагмент кода для этого конкретного предложения." : "The corrected code snippet for this specific suggestion." },
-                        },
-                        required: ['title', 'description', 'correctedCodeSnippet']
-                      }
-                    }
-                  },
-                  required: ['description', 'originalCodeSnippet', 'suggestions']
-                }
-              }
-            },
-            required: ['fileName', 'recommendations']
-          }
+          items: fileAnalysisSchema
         },
         overallSummary: { type: Type.STRING, description: isRussian ? "Общий вывод и рекомендации по всему проекту." : "An overall summary and recommendations for the entire project." }
       },
@@ -173,83 +146,67 @@ const getSchemas = (language: Language) => {
         required: ['changes', 'manualSteps']
     };
 
-    return { analysisSchema, refactorSchema, batchRefactorSchema };
+    return { analysisSchema, fileAnalysisSchema, refactorSchema, batchRefactorSchema };
 }
 
 
-function buildAnalysisPrompt({ libraryFiles, frontendFiles, language }: { libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], language: Language }): string {
+function buildSingleFileAnalysisPrompt(fileToAnalyze: UploadedFile, allFiles: UploadedFile[], language: Language): string {
   const isRussian = language === 'ru';
-  const librarySection = createProjectSection(isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)", libraryFiles);
-  const frontendSection = createProjectSection(isRussian ? "Фронтенд-проект (Использует библиотеку)" : "Frontend Project (Consumes Library)", frontendFiles);
-  
+  const fileNames = allFiles.map(f => f.name).join(', ');
   const langInstruction = isRussian 
-    ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, suggestions, and summaries, must be in Russian."
-    : "You MUST respond exclusively in English. All text, including descriptions, titles, suggestions, and summaries, must be in English.";
-
-  const hasChangelog = hasChangelogFile(libraryFiles, frontendFiles);
-
-  const changelogPolicyInstruction = hasChangelog
-    ? (isRussian
-      ? `
-**Интеграция с политикой Changelog:**
-Для каждого предлагаемого исправления ты должен определить, подпадает ли оно под критерии для записи в журнал изменений согласно стандарту "Keep a Changelog" (т.е. является ли оно видимым для пользователя изменением типа 'Fixed', 'Added', 'Changed', а не внутренним 'refactor' или 'chore').
-- Если изменение **БУДЕТ** добавлено в журнал, ты ОБЯЗАН добавить следующее примечание в формате Markdown в конец поля \`description\` этого предложения:
-  > **Примечание:** Применение этого исправления автоматически добавит запись в ваш \`CHANGELOG.md\`.
-- Если изменение **НЕ БУДЕТ** добавлено в журнал (например, это рефакторинг), ты ОБЯЗАН добавить следующее примечание в формате Markdown в конец поля \`description\` этого предложения:
-  > **Примечание:** Это внутреннее улучшение и оно не будет добавлено в \`CHANGELOG.md\`.
-Это примечание является обязательным для каждого предложения.
-`
-      : `
-**Changelog Policy Integration:**
-For each suggestion you provide, you must determine if the change qualifies for a changelog entry according to the "Keep a Changelog" standard (i.e., it's a user-visible 'Fixed', 'Added', 'Changed', etc., and not an internal 'refactor' or 'chore').
-- If the change **WILL** be logged, you MUST append the following Markdown note to the end of the suggestion's \`description\`:
-  > **Note:** Applying this fix will automatically add an entry to your \`CHANGELOG.md\`.
-- If the change **WILL NOT** be logged (e.g., it's a refactor), you MUST append the following Markdown note to the end of the suggestion's \`description\`:
-  > **Note:** This is an internal improvement and will not be added to \`CHANGELOG.md\`.
-This note is mandatory for every suggestion.
-`)
-    : (isRussian
-      ? `**Политика Changelog:** В проекте отсутствует файл \`CHANGELOG.md\`. НЕ добавляйте никаких примечаний о журнале изменений в ваши ответы.`
-      : `**Changelog Policy:** The project does not contain a \`CHANGELOG.md\` file. DO NOT add any notes about a changelog to your responses.`);
-
+    ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, and suggestions, must be in Russian."
+    : "You MUST respond exclusively in English. All text, including descriptions, titles, and suggestions, must be in English.";
 
   return `
-You are an expert Google Apps Script (GAS) developer and code reviewer. Your task is to analyze the provided GAS project files and return your analysis in a structured JSON format.
+You are an expert Google Apps Script (GAS) developer and code reviewer. Your task is to analyze a single provided GAS project file and return your analysis in a structured JSON format.
 ${langInstruction}
 
-**Project Structure:**
-This project consists of two parts:
-1.  **${isRussian ? "Основной проект (Библиотека)" : "Main Project (Library)"}:** The core logic, intended to be used as a library.
-2.  **${isRussian ? "Фронтенд-проект" : "Frontend Project"}:** A project that consumes the main project as a library.
-
-Analyze them with this relationship in mind.
+**Project Context:**
+You are analyzing the file \`${fileToAnalyze.name}\`.
+This file is part of a larger project that also contains the following files: ${fileNames}.
+Keep this context in mind when identifying issues, especially potential integration problems or incorrect usage of functions from other files. However, your response should only contain recommendations for the file provided below.
 
 **Instructions:**
-1.  **Analyze Holistically:** Review all files to understand the project's overall purpose and architecture.
-2.  **File-by-File Analysis:** For each file in both the library and frontend projects, provide a list of actionable recommendations.
-3.  **Provide Actionable Suggestions:** For each recommendation involving code changes, you MUST extract the \`originalCodeSnippet\` from the user's file.
+1.  **Analyze the File:** Review the file content below.
+2.  **Provide Actionable Suggestions:** For each recommendation involving code changes, you MUST extract the \`originalCodeSnippet\` from the user's file.
     - **CRITICAL:** The \`originalCodeSnippet\` must be a complete, self-contained block of code (e.g., a full function definition from \`function\` to its closing \`}\`).
-    - **CRITICAL:** It must be an **exact, character-for-character copy** from the user's file. Do not change anything, including indentation, whitespace, or comments.
-    - **CRITICAL:** The \`originalCodeSnippet\` **MUST NOT** contain any of your suggested changes or new code. It is only for identifying the code to be replaced.
-4.  **Handle Multiple Solutions:** If a problem has multiple valid solutions (e.g., 'do A or do B'), list each one as a separate suggestion object in the \`suggestions\` array. Each suggestion must have a clear \`title\`, a \`description\` of the approach, and the corresponding \`correctedCodeSnippet\`. If there is only one solution, the \`suggestions\` array should still contain one object.
-5.  **Handle General Advice:** If a recommendation is general and doesn't apply to a specific block of code, the \`originalCodeSnippet\` field should be null, and the \`suggestions\` array should be empty.
-6.  **${isRussian ? "Обработка унаследованных проблем" : "Handle Inherited Issues"}:** ${isRussian ? "Если ты обнаружил проблему во **Фронтенд-проекте**, которая вызвана функцией или зависимостью из **Основного проекта (Библиотеки)** (например, фронтенд вызывает неэффективную функцию библиотеки), ты **ОБЯЗАН** создать рекомендацию." : "If you find an issue in the **Frontend Project** that is caused by a function or dependency from the **Main Project (Library)** (e.g., the frontend calls an inefficient library function), you **MUST** create a recommendation."}
-    - ${isRussian ? "В поле `description` должно быть четко указано, что первопричина находится в библиотеке, и исправление должно быть применено там." : "The `description` should clearly state that the root cause is in the library and the fix should be applied there."}
-    - ${isRussian ? "Ты **ОБЯЗАН** предоставить `originalCodeSnippet` и как минимум одно `suggestion` в массиве `suggestions`." : "You **MUST** still provide an `originalCodeSnippet` and at least one `suggestion` in the `suggestions` array."}
-    - ${isRussian ? "Для этого предложения создай \"исправление-заглушку\". `title` должен быть примерно таким: \"Принять к сведению\", а `description` должен повторять, что исправление находится в библиотеке. `correctedCodeSnippet` **ОБЯЗАН** быть идентичным `originalCodeSnippet`. Это гарантирует, что пользователь будет проинформирован о проблеме в интерфейсе, даже если код в этом конкретном файле не изменится." : "For the suggestion, create a \"placeholder\" fix. The `title` should be something like \"Acknowledge Issue\" and the `description` should reiterate that the fix is in the library. The `correctedCodeSnippet` **MUST** be identical to the `originalCodeSnippet`. This ensures the user is informed of the issue within the UI, even though the code in this specific file won't change."}
-7.  **W3C Standards for HTML:** ${isRussian ? "Для HTML-файлов (`.html`) уделите особое внимание соответствию стандартам W3C (например, правильная вложенность тегов, валидные атрибуты, доступность). Учитывайте, что Google Apps Script может добавлять свой код, но код, написанный пользователем, должен соответствовать стандартам." : "For any HTML files (`.html`), pay special attention to compliance with W3C standards (e.g., proper tag nesting, valid attributes, accessibility). Acknowledge that Google Apps Script may inject its own code, but the user-written code should be standard-compliant."}
-8.  **Overall Summary:** Provide a concluding summary with overarching recommendations.
-9.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
+    - **CRITICAL:** It must be an **exact, character-for-character copy** from the user's file. Do not change anything.
+3.  **Handle Multiple Solutions:** If a problem has multiple valid solutions, list each as a separate suggestion.
+4.  **Handle General Advice:** If a recommendation is general (e.g., "Add comments"), \`originalCodeSnippet\` can be null and \`suggestions\` can be empty.
+5.  **JSON Output:** Structure your entire output according to the provided JSON schema. Do not include any text or markdown outside of the JSON structure.
 
-${changelogPolicyInstruction}
-
-Here are the project files:
-
-${librarySection}
-
-${frontendSection}
+**File to Analyze: ${fileToAnalyze.name}**
+\`\`\`
+${fileToAnalyze.content}
+\`\`\`
 `;
 }
+
+function buildSummaryPrompt(analysis: Analysis, language: Language): string {
+    const isRussian = language === 'ru';
+    const langInstruction = isRussian 
+        ? "You MUST respond exclusively in Russian. Your summary must be in Russian."
+        : "You MUST respond exclusively in English. Your summary must be in English.";
+
+    return `
+You are an expert Google Apps Script (GAS) developer and code reviewer.
+Below is a series of file-by-file analyses for a GAS project. Your task is to synthesize this information into a high-level "Overall Summary".
+
+**Instructions:**
+1. Review all the provided recommendations across all files.
+2. Identify any overarching themes, architectural problems, or critical issues that affect multiple parts of the project.
+3. Write a concise, high-level summary. Do not repeat the individual recommendations. Instead, focus on the big picture. For example, mention things like "The project relies heavily on hardcoded IDs, which should be moved to Script Properties" or "There are several inefficient loops that could be optimized by using object lookups."
+4. Format your response as a single markdown string.
+
+${langInstruction}
+
+**Individual File Analyses:**
+\`\`\`json
+${JSON.stringify(analysis, null, 2)}
+\`\`\`
+`;
+}
+
 
 async function handleGeminiCallWithRetry(prompt: string, schema: object | null, modelName: ModelName, language: Language, retries = 3) {
   const isRussian = language === 'ru';
@@ -337,12 +294,65 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
   }
 }
 
-
-export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName, language }: { libraryFiles: UploadedFile[], frontendFiles: UploadedFile[], modelName: ModelName, language: Language }): Promise<Analysis> {
-  const prompt = buildAnalysisPrompt({ libraryFiles, frontendFiles, language });
-  const { analysisSchema } = getSchemas(language);
-  return handleGeminiCallWithRetry(prompt, analysisSchema, modelName, language);
+interface AnalyzeProjectParams {
+    libraryFiles: UploadedFile[];
+    frontendFiles: UploadedFile[];
+    modelName: ModelName;
+    language: Language;
+    onProgress: (update: ProgressUpdate) => void;
 }
+
+export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName, language, onProgress }: AnalyzeProjectParams): Promise<Analysis> {
+    const allFiles = [...libraryFiles, ...frontendFiles];
+    const totalFiles = allFiles.length;
+    const finalAnalysis: Analysis = {
+        libraryProject: [],
+        frontendProject: [],
+        overallSummary: '',
+    };
+    const { fileAnalysisSchema } = getSchemas(language);
+
+    for (let i = 0; i < totalFiles; i++) {
+        const file = allFiles[i];
+        onProgress({
+            progress: {
+                completed: i,
+                total: totalFiles,
+                currentFile: file.name
+            }
+        });
+
+        const prompt = buildSingleFileAnalysisPrompt(file, allFiles, language);
+        const fileAnalysisResult = await handleGeminiCallWithRetry(prompt, fileAnalysisSchema, modelName, language) as FileAnalysis;
+
+        const isLibraryFile = libraryFiles.some(f => f.name === file.name);
+        if (isLibraryFile) {
+            finalAnalysis.libraryProject.push(fileAnalysisResult);
+            onProgress({ analysis: { libraryProject: [fileAnalysisResult] } });
+        } else {
+            finalAnalysis.frontendProject.push(fileAnalysisResult);
+            onProgress({ analysis: { frontendProject: [fileAnalysisResult] } });
+        }
+    }
+
+    onProgress({
+        progress: {
+            completed: totalFiles,
+            total: totalFiles,
+            currentFile: '' 
+        },
+    });
+
+    if (totalFiles > 0) {
+        const summaryPrompt = buildSummaryPrompt(finalAnalysis, language);
+        const summary = await handleGeminiCallWithRetry(summaryPrompt, null, modelName, language) as string;
+        finalAnalysis.overallSummary = summary;
+        onProgress({ summary });
+    }
+
+    return finalAnalysis;
+}
+
 
 interface AskQuestionParams {
   libraryFiles: UploadedFile[];

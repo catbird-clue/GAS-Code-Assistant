@@ -81,3 +81,16 @@ export interface FailedChange {
   change: RefactorChange;
   reason: 'SNIPPET_NOT_FOUND';
 }
+
+export interface ProgressUpdate {
+  progress?: {
+    completed: number;
+    total: number;
+    currentFile: string;
+  };
+  analysis?: {
+    libraryProject?: FileAnalysis[];
+    frontendProject?: FileAnalysis[];
+  };
+  summary?: string;
+}

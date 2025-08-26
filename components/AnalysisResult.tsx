@@ -1,6 +1,6 @@
 
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import CodeBlock from './CodeBlock';
 import { Analysis, FileAnalysis, Recommendation, SuggestedFix, AnalysisStats } from '../types';
 import { AlertTriangleIcon, CheckIcon, LightbulbIcon, ShieldCheckIcon, FileTextIcon, UndoIcon, WandIcon, XIcon } from './icons';
@@ -8,10 +8,17 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { useTranslation } from '../I18nContext';
 
+interface AnalysisProgress {
+  completed: number;
+  total: number;
+  currentFile: string;
+  isGeneratingSummary: boolean;
+}
 
 interface AnalysisResultProps {
   analysis: Analysis | null;
   isLoading: boolean;
+  analysisProgress: AnalysisProgress | null;
   hasFiles: boolean;
   onApplyFix: (params: { fileName:string; recommendation: Recommendation; recIndex: number; suggestionIndex: number; }) => void;
   notification: string | null;
@@ -326,108 +333,155 @@ const FileAnalysisCard: React.FC<{
   </div>
 );
 
-const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, hasFiles, onApplyFix, notification, onDismissNotification, analysisStats, onUndo, onUndoFix, canUndo, selectedFixes, onToggleFixSelection, onApplySelectedFixes, isApplyingChanges }) => {
+const AnalysisResult: React.FC<AnalysisResultProps> = ({ analysis, isLoading, analysisProgress, hasFiles, onApplyFix, notification, onDismissNotification, analysisStats, onUndo, onUndoFix, canUndo, selectedFixes, onToggleFixSelection, onApplySelectedFixes, isApplyingChanges }) => {
   const { t } = useTranslation();
   const selectedCount = Object.keys(selectedFixes).length;
+  const [jokes, setJokes] = useState<string[]>([]);
+  const [currentJoke, setCurrentJoke] = useState('');
+  const [fade, setFade] = useState(true);
 
-  if (isLoading) {
-    return (
-      <div className="p-6 text-center text-gray-400">
-        <div>{t('analysisInProgress')}</div>
-      </div>
-    );
-  }
-  
-  if (analysis) {
-    return (
-      <>
-        {notification && (
-          <div className="p-4 mx-4 mt-4 bg-yellow-900/30 border border-yellow-700/50 text-yellow-200 rounded-lg flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <AlertTriangleIcon />
-              <span>{notification}</span>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {canUndo && (
-                <button 
-                  onClick={onUndo} 
-                  className="flex items-center gap-2 bg-gray-600 hover:bg-gray-500 text-white font-semibold px-3 py-1.5 rounded-md text-sm transition-colors"
-                >
-                  <UndoIcon />
-                  {t('undo')}
-                </button>
-              )}
-              <button onClick={onDismissNotification} className="text-yellow-200 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors" aria-label={t('closeNotificationAria')}>
-                  <XIcon className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-        )}
-        <AnalysisSummary analysis={analysis} />
-        <div className="p-4 md:p-6 text-base max-w-none relative">
-            {analysisStats && <AnalysisMetrics stats={analysisStats} />}
-    
-            {analysis.libraryProject.length > 0 && (
-                <div className="mb-8">
-                    <h2 className="text-xl font-bold mt-4 mb-4 text-white">{t('libraryProjectTitle')}</h2>
-                    {analysis.libraryProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} onUndoFix={onUndoFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
-                </div>
-            )}
-            {analysis.frontendProject.length > 0 && (
-                  <div className="mb-8">
-                    <h2 className="text-xl font-bold mt-8 mb-4 text-white">{t('frontendProjectTitle')}</h2>
-                    {analysis.frontendProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} onUndoFix={onUndoFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
-                </div>
-            )}
-            <div>
-                <h2 className="text-xl font-bold mt-8 mb-4 text-white">{t('overallSummary')}</h2>
-                <div
-                  className="text-gray-300 leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(analysis.overallSummary) as string) }}
-                />
-            </div>
-            {selectedCount > 0 && (
-              <div className="sticky bottom-4 inset-x-4 mt-8 p-3 bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-lg shadow-lg flex items-center justify-between gap-4">
-                <span className="font-semibold text-white">{t('fixesSelected', { count: selectedCount })}</span>
-                <button 
-                  onClick={onApplySelectedFixes}
-                  disabled={isApplyingChanges}
-                  className="flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed"
-                >
-                  {isApplyingChanges ? (
-                    <>
-                      <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      {t('applying')}...
-                    </>
-                  ) : (
-                    <>
-                      <WandIcon />
-                      {t('applySelected')}
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-        </div>
-      </>
-    );
-  }
+  useEffect(() => {
+    const jokesString = t('jokes');
+    const jokesArray = jokesString.split('|||');
+    setJokes(jokesArray);
+    if (jokesArray.length > 0) {
+      setCurrentJoke(jokesArray[0]);
+    }
+  }, [t]);
 
-  // Fallback placeholders
-  if (!hasFiles) {
+  useEffect(() => {
+    if (isLoading && jokes.length > 0) {
+      let index = 0;
+      const intervalId = setInterval(() => {
+        setFade(false); 
+        setTimeout(() => {
+          index = (index + 1) % jokes.length;
+          setCurrentJoke(jokes[index]);
+          setFade(true);
+        }, 500);
+      }, 4000); 
+      return () => clearInterval(intervalId);
+    }
+  }, [isLoading, jokes]);
+
+  if (!analysis && !isLoading) {
+    if (!hasFiles) {
+        return (
+            <div className="p-6 text-center text-gray-500 h-full flex items-center justify-center">
+                <div>{t('startAnalysisPlaceholder')}</div>
+            </div>
+        );
+    }
     return (
         <div className="p-6 text-center text-gray-500 h-full flex items-center justify-center">
-            <div>{t('startAnalysisPlaceholder')}</div>
+            <div>{t('runAnalysisPlaceholder')}</div>
         </div>
     );
   }
+
   return (
-      <div className="p-6 text-center text-gray-500 h-full flex items-center justify-center">
-          <div>{t('runAnalysisPlaceholder')}</div>
+    <>
+      {isLoading && analysisProgress && (
+          <div className="p-4 m-4 bg-gray-700/50 border border-gray-600 text-gray-300 rounded-lg text-center">
+             <div className="flex items-center justify-center gap-3">
+                <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                {analysisProgress.isGeneratingSummary
+                  ? t('generatingSummary')
+                  : t('analysisProgress', {
+                      currentFile: analysisProgress.currentFile,
+                      completed: analysisProgress.completed + 1,
+                      total: analysisProgress.total,
+                    })}
+             </div>
+             {jokes.length > 0 && (
+                <div className="text-sm text-gray-400 italic mt-3 h-5">
+                    <p className={`transition-opacity duration-500 ${fade ? 'opacity-100' : 'opacity-0'}`}>
+                        &ldquo;{currentJoke}&rdquo;
+                    </p>
+                </div>
+              )}
+          </div>
+      )}
+
+      {notification && (
+        <div className="p-4 mx-4 mt-4 bg-yellow-900/30 border border-yellow-700/50 text-yellow-200 rounded-lg flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <AlertTriangleIcon />
+            <span>{notification}</span>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {canUndo && (
+              <button 
+                onClick={onUndo} 
+                className="flex items-center gap-2 bg-gray-600 hover:bg-gray-500 text-white font-semibold px-3 py-1.5 rounded-md text-sm transition-colors"
+              >
+                <UndoIcon />
+                {t('undo')}
+              </button>
+            )}
+            <button onClick={onDismissNotification} className="text-yellow-200 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors" aria-label={t('closeNotificationAria')}>
+                <XIcon className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {analysis && !isLoading && <AnalysisSummary analysis={analysis} />}
+
+      <div className="p-4 md:p-6 text-base max-w-none relative">
+          {analysisStats && !isLoading && <AnalysisMetrics stats={analysisStats} />}
+  
+          {analysis && analysis.libraryProject.length > 0 && (
+              <div className="mb-8">
+                  <h2 className="text-xl font-bold mt-4 mb-4 text-white">{t('libraryProjectTitle')}</h2>
+                  {analysis.libraryProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} onUndoFix={onUndoFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
+              </div>
+          )}
+          {analysis && analysis.frontendProject.length > 0 && (
+                <div className="mb-8">
+                  <h2 className="text-xl font-bold mt-8 mb-4 text-white">{t('frontendProjectTitle')}</h2>
+                  {analysis.frontendProject.map(file => <FileAnalysisCard key={file.fileName} fileAnalysis={file} onApplyFix={onApplyFix} onUndoFix={onUndoFix} selectedFixes={selectedFixes} onToggleFixSelection={onToggleFixSelection} />)}
+              </div>
+          )}
+          {analysis && analysis.overallSummary && (
+            <div>
+              <h2 className="text-xl font-bold mt-8 mb-4 text-white">{t('overallSummary')}</h2>
+              <div
+                className="text-gray-300 leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(analysis.overallSummary) as string) }}
+              />
+            </div>
+          )}
+          {selectedCount > 0 && (
+            <div className="sticky bottom-4 inset-x-4 mt-8 p-3 bg-gray-700/80 backdrop-blur-sm border border-gray-600 rounded-lg shadow-lg flex items-center justify-between gap-4">
+              <span className="font-semibold text-white">{t('fixesSelected', { count: selectedCount })}</span>
+              <button 
+                onClick={onApplySelectedFixes}
+                disabled={isApplyingChanges}
+                className="flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed"
+              >
+                {isApplyingChanges ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    {t('applying')}...
+                  </>
+                ) : (
+                  <>
+                    <WandIcon />
+                    {t('applySelected')}
+                  </>
+                )}
+              </button>
+            </div>
+          )}
       </div>
+    </>
   );
 };
 

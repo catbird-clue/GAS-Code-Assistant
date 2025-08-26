@@ -71,6 +71,8 @@ export const translations: Record<string, Record<string, string>> = {
     
     // Analysis Result Pane
     analysisInProgress: "Analyzing your code... This may take a few seconds.",
+    analysisProgress: "Analyzing file {{currentFile}} ({{completed}} of {{total}})...",
+    generatingSummary: "Generating final summary...",
     startAnalysisPlaceholder: "Upload your project files to start the analysis.",
     runAnalysisPlaceholder: "Click 'Analyze' to see the results here.",
     recommendations: "Recommendations",
@@ -97,6 +99,7 @@ export const translations: Record<string, Record<string, string>> = {
     fixesSelected: "{{count}} fixes selected",
     applying: "Applying",
     applySelected: "Apply Selected",
+    jokes: "Why do programmers prefer dark mode? Because light attracts bugs.|||There are 10 types of people: those who understand binary, and those who don't.|||A programmer's wife says, 'Go to the store, buy a loaf of bread. If they have eggs, buy a dozen.' He returns with 12 loaves.|||!false (It's funny because it's true).|||Debugging is like being the detective in a crime movie where you are also the murderer.|||A SQL query goes into a bar, walks up to two tables and asks, 'Can I join you?'|||To understand recursion, you must first understand recursion.|||Programmer: A machine that turns coffee into code.|||Why did the programmer quit his job? Because he didn't get arrays.|||What's the object-oriented way to get wealthy? Inheritance.|||I would tell you a UDP joke, but you might not get it.|||Software is like a cathedral: first we build it, then we pray.|||Why do Java developers wear glasses? Because they don't C#.|||A programmer puts two glasses on his bedside table. One full of water, and one empty. The full one is in case he gets thirsty, and the empty one is in case he doesn't.|||The best thing about a boolean is even if you are wrong, you are only off by a bit.|||Knock, knock. Who's there? ... very long pause ... Java.",
     // markdown report
     reportTitle_md: "Code Analysis Report",
     overallSummary_md: "Overall Summary",
@@ -210,6 +213,8 @@ export const translations: Record<string, Record<string, string>> = {
 
     // Analysis Result Pane
     analysisInProgress: "Идет анализ вашего кода... Это может занять несколько секунд.",
+    analysisProgress: "Анализ файла {{currentFile}} ({{completed}} из {{total}})...",
+    generatingSummary: "Генерация итогового отчета...",
     startAnalysisPlaceholder: "Загрузите файлы вашего проекта, чтобы начать анализ.",
     runAnalysisPlaceholder: "Нажмите \"Анализ\", чтобы увидеть результаты здесь.",
     recommendations: "Рекомендаций",
@@ -236,6 +241,7 @@ export const translations: Record<string, Record<string, string>> = {
     fixesSelected: "Выбрано исправлений: {{count}}",
     applying: "Применение",
     applySelected: "Применить выбранные",
+    jokes: "Почему программисты любят темную тему? Потому что свет привлекает баги.|||Есть 10 типов людей: те, кто понимают двоичный код, и те, кто нет.|||Жена программиста говорит: 'Сходи в магазин, купи хлеб. Если будут яйца, возьми десяток'. Он вернулся с 10 буханками хлеба.|||!false (Это смешно, потому что true).|||Отладка — это как быть детективом в фильме, где ты одновременно и убийца.|||SQL-запрос заходит в бар, подходит к двум столикам и спрашивает: 'Можно к вам присоединиться?'|||Чтобы понять, что такое рекурсия, нужно сначала понять, что такое рекурсия.|||Программист — это машина для преобразования кофе в код.|||Как по-объектно-ориентированному разбогатеть? Через наследование.|||Я бы рассказал вам шутку про UDP, но вы можете ее не получить.|||Программное обеспечение как собор: сначала мы его строим, потом молимся.|||Почему Java-разработчики носят очки? Потому что они плохо видят C#.|||Программист ставит на тумбочку два стакана. Один с водой, другой пустой. Полный — если захочет пить. Пустой — если не захочет.|||Самое лучшее в булевых значениях — это то, что даже если ты ошибся, то ошибся всего на один бит.|||Тук-тук. Кто там? ... очень долгая пауза ... Java.",
     // markdown report
     reportTitle_md: "Отчет по анализу кода",
     overallSummary_md: "Общий вывод",
