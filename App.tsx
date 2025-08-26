@@ -6,12 +6,13 @@ import FileUpload from './components/FileUpload';
 import AnalysisResult from './components/AnalysisResult';
 import ChatView from './components/ChatView';
 import { analyzeGasProject, refactorCode, updateChangelog, askQuestionAboutCode, batchRefactorCode, correctRefactorResult } from './services/geminiService';
-import { GithubIcon, FileCodeIcon, WandIcon, DownloadIcon, XIcon, BeakerIcon, HelpIcon } from './components/icons';
+import { GithubIcon, FileCodeIcon, WandIcon, DownloadIcon, XIcon, BeakerIcon, HelpIcon, EyeIcon } from './components/icons';
 import RefactorResultModal from './components/RefactorResultModal';
 import { Chat } from '@google/genai';
 import HelpModal from './components/HelpModal';
 import { useTranslation } from './I18nContext';
 import { demoLibraryFiles, demoFrontendFiles } from './demoProject';
+import FileViewerModal from './components/FileViewerModal';
 
 interface UndoState {
   libraryFiles: UploadedFile[];
@@ -59,6 +60,10 @@ export default function App(): React.ReactNode {
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [modelName, setModelName] = useState<ModelName>('gemini-2.5-flash');
+  
+  const [isFileViewerOpen, setIsFileViewerOpen] = useState(false);
+  const [currentFileToView, setCurrentFileToView] = useState<UploadedFile | null>(null);
+
 
   const pushToUndoStack = (state: UndoState) => {
     const newStack = [...undoStack, state];
@@ -120,6 +125,11 @@ export default function App(): React.ReactNode {
     setFrontendFiles(demoFrontendFiles);
     clearAnalysisAndChat();
     setNotification(t('demoProjectLoaded'));
+  };
+  
+  const handleViewFile = (file: UploadedFile) => {
+    setCurrentFileToView(file);
+    setIsFileViewerOpen(true);
   };
 
   const handleAnalyze = useCallback(async () => {
@@ -669,6 +679,7 @@ export default function App(): React.ReactNode {
                                       {file.changesCount && file.changesCount > 0 && <span className="ml-2 text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full">{file.changesCount}</span>}
                                   </div>
                                   <div className="flex items-center flex-shrink-0">
+                                      <button onClick={() => handleViewFile(file)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('viewFile', {fileName: file.name})}><EyeIcon /></button>
                                       <button onClick={() => downloadFile(file)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('download', {fileName: file.name})}><DownloadIcon /></button>
                                       <button onClick={() => handleRemoveLibraryFile(index)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('remove', {fileName: file.name})}><XIcon className="w-4 h-4" /></button>
                                   </div>
@@ -695,6 +706,7 @@ export default function App(): React.ReactNode {
                                        {file.changesCount && file.changesCount > 0 && <span className="ml-2 text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full">{file.changesCount}</span>}
                                   </div>
                                   <div className="flex items-center flex-shrink-0">
+                                      <button onClick={() => handleViewFile(file)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('viewFile', {fileName: file.name})}><EyeIcon /></button>
                                       <button onClick={() => downloadFile(file)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('download', {fileName: file.name})}><DownloadIcon /></button>
                                       <button onClick={() => handleRemoveFrontendFile(index)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('remove', {fileName: file.name})}><XIcon className="w-4 h-4" /></button>
                                   </div>
@@ -714,7 +726,7 @@ export default function App(): React.ReactNode {
                         className="w-full flex-grow bg-indigo-600 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                         {isAnalyzing && (
-                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
@@ -832,6 +844,11 @@ export default function App(): React.ReactNode {
         onConfirm={(result) => handleConfirmRefactor(result)}
       />
       <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
+      <FileViewerModal 
+        isOpen={isFileViewerOpen}
+        onClose={() => setIsFileViewerOpen(false)}
+        file={currentFileToView}
+      />
     </div>
   );
 }

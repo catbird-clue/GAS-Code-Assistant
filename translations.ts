@@ -23,6 +23,7 @@ export const translations: Record<string, Record<string, string>> = {
     // File list
     download: "Download {{fileName}}",
     remove: "Remove {{fileName}}",
+    viewFile: "View {{fileName}}",
 
     // Analysis & Actions Section
     analysisTitle: "3. Analysis & Questions",
@@ -141,6 +142,9 @@ export const translations: Record<string, Record<string, string>> = {
     
     // Help Modal
     helpTitle: "Help & About",
+
+    // File Viewer Modal
+    fileContentTitle: "File Content: {{fileName}}",
   },
   ru: {
     // Header
@@ -165,6 +169,7 @@ export const translations: Record<string, Record<string, string>> = {
     // File list
     download: "Скачать {{fileName}}",
     remove: "Удалить {{fileName}}",
+    viewFile: "Просмотреть {{fileName}}",
 
     // Analysis & Actions Section
     analysisTitle: "3. Анализ и вопросы",
@@ -283,5 +288,8 @@ export const translations: Record<string, Record<string, string>> = {
     
     // Help Modal
     helpTitle: "Справка и информация о приложении",
+    
+    // File Viewer Modal
+    fileContentTitle: "Содержимое файла: {{fileName}}",
   }
 };
