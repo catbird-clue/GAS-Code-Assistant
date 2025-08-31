@@ -1,3 +1,4 @@
+
 export const translations: Record<string, Record<string, string>> = {
   en: {
     // Header
@@ -27,7 +28,7 @@ export const translations: Record<string, Record<string, string>> = {
 
     // Analysis & Actions Section
     analysisTitle: "3. Analysis & Questions",
-    questionPlaceholder: "Ask a specific question about the code...",
+    questionPlaceholder: "Ask a question (Shift+Enter for new line)...",
     analyze: "Analyze",
     reanalyze: "Re-analyze",
     analyzing: "Analyzing...",
@@ -69,7 +70,11 @@ export const translations: Record<string, Record<string, string>> = {
     demoProjectLoaded: "Demo project loaded successfully.",
     specificUndoSuccess: "The fix has been reverted.",
     undoFailedError: "Could not undo the fix because the necessary undo data was not found.",
-    
+    reanalyzingWithContext: "Re-analyzing with context from your chat...",
+    chatClearedNotification: "Chat history and context have been cleared.",
+    clearChatWarning: "Are you sure you want to clear the entire chat history? This action cannot be undone.",
+    clearChatTitle: "Clear chat history and reset context",
+
     // Analysis Result Pane
     analysisInProgress: "Analyzing your code... This may take a few seconds.",
     analysisProgress: "Analyzing file {{currentFile}} ({{completed}} of {{total}})...",
@@ -173,7 +178,7 @@ export const translations: Record<string, Record<string, string>> = {
 
     // Analysis & Actions Section
     analysisTitle: "3. Анализ и вопросы",
-    questionPlaceholder: "Задайте конкретный вопрос по коду...",
+    questionPlaceholder: "Задайте вопрос (Shift+Enter для новой строки)...",
     analyze: "Анализ",
     reanalyze: "Повторить",
     analyzing: "Анализ...",
@@ -215,6 +220,10 @@ export const translations: Record<string, Record<string, string>> = {
     demoProjectLoaded: "Демо-проект успешно загружен.",
     specificUndoSuccess: "Исправление отменено.",
     undoFailedError: "Не удалось отменить исправление, так как не найдены необходимые данные для отмены.",
+    reanalyzingWithContext: "Повторный анализ с учетом контекста из вашего чата...",
+    chatClearedNotification: "История чата и контекст были очищены.",
+    clearChatWarning: "Вы уверены, что хотите очистить всю историю чата? Это действие нельзя отменить.",
+    clearChatTitle: "Очистить историю чата и сбросить контекст",
 
     // Analysis Result Pane
     analysisInProgress: "Идет анализ вашего кода... Это может занять несколько секунд.",

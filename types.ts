@@ -1,6 +1,5 @@
 
-
-export type ModelName = 'gemini-2.5-flash' | 'gemini-2.5-pro';
+export type ModelName = 'gemini-2.5-flash';
 
 export interface UploadedFile {
   name: string;

@@ -1,7 +1,4 @@
 
-
-
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { UploadedFile, Analysis, Recommendation, RefactorResult, ConversationTurn, AnalysisStats, RefactorChange, FileAnalysis, BatchRefactorResult, FailedChange, ModelName, ProgressUpdate } from './types';
 import FileUpload from './components/FileUpload';
@@ -54,6 +51,7 @@ export default function App(): React.ReactNode {
   const [conversationHistory, setConversationHistory] = useState<ConversationTurn[]>([]);
   const [isAnswering, setIsAnswering] = useState<boolean>(false);
   const chatSessionRef = useRef<Chat | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [autoReanalyze, setAutoReanalyze] = useState(false);
   const [undoStack, setUndoStack] = useState<UndoState[]>([]);
@@ -61,11 +59,17 @@ export default function App(): React.ReactNode {
   const [selectedFixes, setSelectedFixes] = useState<Record<string, {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}>>({});
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis');
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
-  const [modelName, setModelName] = useState<ModelName>('gemini-2.5-flash');
+  const [modelName] = useState<ModelName>('gemini-2.5-flash');
   
   const [isFileViewerOpen, setIsFileViewerOpen] = useState(false);
   const [currentFileToView, setCurrentFileToView] = useState<UploadedFile | null>(null);
 
+  useEffect(() => {
+    if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [userQuestion]);
 
   const pushToUndoStack = (state: UndoState) => {
     const newStack = [...undoStack, state];
@@ -143,10 +147,17 @@ export default function App(): React.ReactNode {
     setIsAnalyzing(true);
     setError(null);
     setAnalysisResult(null);
-    setNotification(null);
+    if (conversationHistory.length > 0) {
+        setNotification(t('reanalyzingWithContext'));
+    } else {
+        setNotification(null);
+    }
     setAnalysisStats(null);
-    setConversationHistory([]);
-    chatSessionRef.current = null;
+    // Do not clear conversation history on re-analyze
+    if (undoStack.length === 0) { // Only clear chat if it's a fresh analysis
+        setConversationHistory([]);
+        chatSessionRef.current = null;
+    }
     setActiveTab('analysis');
     setUndoStack([]);
 
@@ -178,7 +189,8 @@ export default function App(): React.ReactNode {
         frontendFiles,
         modelName,
         language,
-        onProgress: handleProgress
+        onProgress: handleProgress,
+        conversationHistory: conversationHistory,
       });
       setAnalysisResult(result);
       
@@ -201,7 +213,7 @@ export default function App(): React.ReactNode {
       setIsAnalyzing(false);
       setAnalysisProgress(null);
     }
-  }, [libraryFiles, frontendFiles, modelName, language, t]);
+  }, [libraryFiles, frontendFiles, modelName, language, t, conversationHistory, undoStack.length]);
 
    const handleAskQuestion = useCallback(async () => {
     if (!userQuestion.trim()) {
@@ -355,6 +367,33 @@ export default function App(): React.ReactNode {
     return { newLibraryFiles, newFrontendFiles, failedChanges };
 };
 
+  const maybeUpdateChangelog = useCallback(async (changes: { title: string, fileName: string }[]) => {
+    if (changes.length === 0) return;
+
+    const allFiles = [...libraryFiles, ...frontendFiles];
+    const changelogFile = allFiles.find(f => f.name.toUpperCase() === 'CHANGELOG.MD');
+    if (!changelogFile) return;
+
+    try {
+      const changeDescriptions = changes.map(c => t('changelogEntry', { fileName: c.fileName, title: c.title })).join('\n- ');
+      const newChangelogContent = await updateChangelog({
+        currentChangelog: changelogFile.content,
+        changeDescription: changeDescriptions,
+        modelName,
+        language
+      });
+
+      const isLibFile = libraryFiles.some(f => f.name.toUpperCase() === 'CHANGELOG.MD');
+      if (isLibFile) {
+        setLibraryFiles(prev => prev.map(f => f.name.toUpperCase() === 'CHANGELOG.MD' ? { ...f, content: newChangelogContent } : f));
+      } else {
+        setFrontendFiles(prev => prev.map(f => f.name.toUpperCase() === 'CHANGELOG.MD' ? { ...f, content: newChangelogContent } : f));
+      }
+    } catch (e) {
+      console.error(e);
+      setError(t('changelogUpdateFailed'));
+    }
+  }, [libraryFiles, frontendFiles, modelName, language, t]);
 
   const handleConfirmRefactor = useCallback(async (result: RefactorResult, isCorrection = false, attempt = 1) => {
     const MAX_ATTEMPTS = 3;
@@ -362,252 +401,228 @@ export default function App(): React.ReactNode {
     setIsApplyingChanges(true);
 
     const { newLibraryFiles, newFrontendFiles, failedChanges } = applyChangesToFiles(allChanges, libraryFiles, frontendFiles);
-
+    
     if (failedChanges.length > 0) {
-      if (attempt >= MAX_ATTEMPTS) {
+        if (attempt >= MAX_ATTEMPTS) {
+            const failedSnippets = failedChanges.map(f => `\n- \`${f.change.fileName}\``).join('');
+            setError(t('maxAttemptsError', { maxAttempts: MAX_ATTEMPTS, failedSnippets }));
+            setIsApplyingChanges(false);
+            setIsRefactorModalOpen(false);
+            return;
+        }
+        setNotification(t('selfCorrectionAttempt', { attempt: attempt + 1 }));
+        try {
+            const correctedResult = await correctRefactorResult({
+                originalResult: result,
+                failedChanges,
+                instruction: currentInstruction!,
+                libraryFiles,
+                frontendFiles,
+                modelName,
+                language
+            });
+            await handleConfirmRefactor(correctedResult, true, attempt + 1);
+        } catch (e) {
+            console.error(e);
+            setError(t('selfCorrectionError', { errorMsg: e instanceof Error ? e.message : String(e) }));
+            setIsApplyingChanges(false);
+            setIsRefactorModalOpen(false);
+        }
+    } else {
+        pushToUndoStack({ libraryFiles, frontendFiles, analysisResult });
+        setLibraryFiles(newLibraryFiles);
+        setFrontendFiles(newFrontendFiles);
+
+        let newAnalysis = JSON.parse(JSON.stringify(analysisResult)) as Analysis;
+        if (newAnalysis && refactoringRecommendation) {
+            const { fileName, recIndex, suggestionIndex } = refactoringRecommendation;
+            const isLibFile = newAnalysis.libraryProject.some(p => p.fileName === fileName);
+            const project = isLibFile ? newAnalysis.libraryProject : newAnalysis.frontendProject;
+            const fileAnalysis = project.find(p => p.fileName === fileName);
+            if (fileAnalysis && fileAnalysis.recommendations[recIndex]) {
+                fileAnalysis.recommendations[recIndex].appliedSuggestionIndex = suggestionIndex;
+                fileAnalysis.recommendations[recIndex].appliedRefactorResult = result;
+            }
+            setAnalysisResult(newAnalysis);
+        }
+
+        if (refactoringRecommendation) {
+            const allProjectFiles = analysisResult ? [...analysisResult.libraryProject, ...analysisResult.frontendProject] : [];
+            const fileWithRec = allProjectFiles.find(f => f.fileName === refactoringRecommendation.fileName);
+            const recommendation = fileWithRec?.recommendations[refactoringRecommendation.recIndex];
+            const suggestion = recommendation?.suggestions[refactoringRecommendation.suggestionIndex];
+            
+            if (suggestion) {
+                await maybeUpdateChangelog([{title: suggestion.title, fileName: refactoringRecommendation.fileName}]);
+            }
+        }
+        
         setIsApplyingChanges(false);
         setIsRefactorModalOpen(false);
-        const failedSnippets = failedChanges.map(f => `\n- ${f.change.fileName}`).join('');
-        setError(t('maxAttemptsError', { maxAttempts: MAX_ATTEMPTS, failedSnippets }));
+        setNotification(t('changesAppliedNotification'));
+
+        if (autoReanalyze && !isCorrection) {
+            setTimeout(() => handleAnalyze(), 500);
+        }
+    }
+  }, [libraryFiles, frontendFiles, analysisResult, refactoringRecommendation, currentInstruction, modelName, language, autoReanalyze, t, handleAnalyze, maybeUpdateChangelog]);
+
+  const handleToggleFixSelection = (key: string, fixDetails: {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}) => {
+    setSelectedFixes(prev => {
+      const newSelected = { ...prev };
+      if (newSelected[key]) {
+        delete newSelected[key];
+      } else {
+        newSelected[key] = fixDetails;
+      }
+      return newSelected;
+    });
+  };
+
+  const handleBatchApply = useCallback(async () => {
+    const fixesToApply = Object.values(selectedFixes);
+    if (fixesToApply.length === 0) {
+      setError(t('noFixesSelectedError'));
+      return;
+    }
+
+    pushToUndoStack({
+      libraryFiles,
+      frontendFiles,
+      analysisResult
+    });
+
+    setIsApplyingChanges(true);
+    setNotification(null);
+    setError(null);
+
+    const instructions = fixesToApply.map(fix => {
+      const suggestion = fix.rec.suggestions[fix.suggestionIndex];
+      return {
+        fileName: fix.fileName,
+        code: fix.rec.originalCodeSnippet,
+        instruction: `${fix.rec.description}\n\n${t('specificSuggestion')}: ${suggestion.title} - ${suggestion.description}`
+      };
+    });
+
+    try {
+      const result: BatchRefactorResult = await batchRefactorCode({
+        instructions,
+        libraryFiles,
+        frontendFiles,
+        modelName,
+        language
+      });
+      
+      const { newLibraryFiles, newFrontendFiles, failedChanges } = applyChangesToFiles(result.changes, libraryFiles, frontendFiles);
+
+      if (failedChanges.length === result.changes.length && result.changes.length > 0) {
+        const failedFiles = [...new Set(failedChanges.map(f => `\`${f.change.fileName}\``))].join(', ');
+        setError(t('batchApplyFailedError', { failedFiles }));
+        setIsApplyingChanges(false);
         return;
       }
       
-      setNotification(t('selfCorrectionAttempt', { attempt: attempt + 1 }));
-      
-      try {
-        const correctedResult = await correctRefactorResult({
-            originalResult: result,
-            failedChanges,
-            libraryFiles,
-            frontendFiles,
-            instruction: currentInstruction!,
-            modelName,
-            language
+      setLibraryFiles(newLibraryFiles);
+      setFrontendFiles(newFrontendFiles);
+
+      let newAnalysis = JSON.parse(JSON.stringify(analysisResult)) as Analysis;
+      if (newAnalysis) {
+        fixesToApply.forEach(fix => {
+          const isLibFile = newAnalysis.libraryProject.some(p => p.fileName === fix.fileName);
+          const project = isLibFile ? newAnalysis.libraryProject : newAnalysis.frontendProject;
+          const fileAnalysis = project.find(p => p.fileName === fix.fileName);
+          if (fileAnalysis && fileAnalysis.recommendations[fix.recIndex]) {
+            fileAnalysis.recommendations[fix.recIndex].appliedSuggestionIndex = fix.suggestionIndex;
+          }
         });
-        setCurrentRefactor(correctedResult);
-        await handleConfirmRefactor(correctedResult, true, attempt + 1);
-      } catch (e) {
-          setIsApplyingChanges(false);
-          setIsRefactorModalOpen(false);
-          setError(t('selfCorrectionError', { errorMsg: e instanceof Error ? e.message : String(e) }));
+        setAnalysisResult(newAnalysis);
       }
+
+      await maybeUpdateChangelog(fixesToApply.map(fix => {
+        const suggestion = fix.rec.suggestions[fix.suggestionIndex];
+        return {
+          fileName: fix.fileName,
+          title: suggestion.title,
+        }
+      }));
+      
+      setNotification(t('fixesAppliedNotification', { count: fixesToApply.length - failedChanges.length }));
+      setSelectedFixes({});
+
+      if (autoReanalyze) {
+        setTimeout(() => handleAnalyze(), 500);
+      }
+
+    } catch(e) {
+      console.error(e);
+      setError(e instanceof Error ? e.message : t('batchApplyUnknownError'));
+    } finally {
+      setIsApplyingChanges(false);
+    }
+
+  }, [selectedFixes, libraryFiles, frontendFiles, modelName, language, analysisResult, t, autoReanalyze, handleAnalyze, maybeUpdateChangelog]);
+  
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    
+    const lastState = undoStack[undoStack.length - 1];
+    setLibraryFiles(lastState.libraryFiles);
+    setFrontendFiles(lastState.frontendFiles);
+    setAnalysisResult(lastState.analysisResult);
+
+    setUndoStack(prev => prev.slice(0, -1));
+    setNotification(t('undoNotification'));
+    setError(null);
+  }, [undoStack, t]);
+
+  const handleUndoFix = useCallback((fileName: string, recIndex: number) => {
+    pushToUndoStack({
+      libraryFiles,
+      frontendFiles,
+      analysisResult
+    });
+
+    const analysis = analysisResult!;
+    const isLibFile = analysis.libraryProject.some(f => f.fileName === fileName);
+    const project = isLibFile ? analysis.libraryProject : analysis.frontendProject;
+    const fileAnalysis = project.find(f => f.fileName === fileName)!;
+    const recommendation = fileAnalysis.recommendations[recIndex];
+    
+    if (!recommendation.appliedRefactorResult) {
+      setError(t('undoFailedError'));
       return;
     }
     
-    pushToUndoStack({
-      libraryFiles: libraryFiles,
-      frontendFiles: frontendFiles,
-      analysisResult: analysisResult
-    });
+    const { mainChange, relatedChanges } = recommendation.appliedRefactorResult;
+    const allChangesToUndo = [mainChange, ...relatedChanges];
+    
+    const changesToApply = allChangesToUndo.map(change => ({
+      ...change,
+      originalCodeSnippet: change.correctedCodeSnippet,
+      correctedCodeSnippet: change.originalCodeSnippet
+    }));
+
+    const { newLibraryFiles, newFrontendFiles } = applyChangesToFiles(changesToApply, libraryFiles, frontendFiles);
 
     setLibraryFiles(newLibraryFiles);
     setFrontendFiles(newFrontendFiles);
 
-    if (refactoringRecommendation && analysisResult) {
-      const newAnalysisResult: Analysis = JSON.parse(JSON.stringify(analysisResult));
-      const { fileName, recIndex, suggestionIndex } = refactoringRecommendation;
-      
-      const fileAnalysis = 
-        newAnalysisResult.libraryProject.find(f => f.fileName === fileName) ||
-        newAnalysisResult.frontendProject.find(f => f.fileName === fileName);
-
-      if (fileAnalysis && fileAnalysis.recommendations[recIndex]) {
-        fileAnalysis.recommendations[recIndex].appliedSuggestionIndex = suggestionIndex;
-        fileAnalysis.recommendations[recIndex].appliedRefactorResult = result;
-        setAnalysisResult(newAnalysisResult);
-      } else {
-        setError(t('originalRecommendationError', {fileName}));
-      }
+    const newAnalysisResult = JSON.parse(JSON.stringify(analysisResult)) as Analysis;
+    const projectToUpdate = (isLibFile ? newAnalysisResult.libraryProject : newAnalysisResult.frontendProject);
+    const fileToUpdate = projectToUpdate.find(f => f.fileName === fileName);
+    if (fileToUpdate) {
+        const recToUpdate = fileToUpdate.recommendations[recIndex];
+        delete recToUpdate.appliedSuggestionIndex;
+        delete recToUpdate.appliedRefactorResult;
     }
-    
-    setIsRefactorModalOpen(false);
-    setIsApplyingChanges(false);
-    setNotification(t('changesAppliedNotification'));
-  
-    // Update changelog
-    if (refactoringRecommendation && result.mainChange) {
-      const { fileName } = refactoringRecommendation;
-      const isLibraryChange = newLibraryFiles.some(f => f.name === fileName);
-
-      const projectFiles = isLibraryChange ? newLibraryFiles : newFrontendFiles;
-      const setProjectFiles = isLibraryChange ? setLibraryFiles : setFrontendFiles;
-      
-      const changelogFile = projectFiles.find(f => f.name.toUpperCase() === 'CHANGELOG.MD');
-      
-      if (changelogFile) {
-        try {
-          const rec = 
-            (analysisResult?.libraryProject.find(f => f.fileName === fileName) || analysisResult?.frontendProject.find(f => f.fileName === fileName))
-            ?.recommendations[refactoringRecommendation.recIndex];
-          
-          const title = rec?.suggestions[refactoringRecommendation.suggestionIndex].title || 'Applied code refactoring';
-          const changeDescription = t('changelogEntry', { fileName, title });
-
-          const updatedChangelogContent = await updateChangelog({
-              currentChangelog: changelogFile.content,
-              changeDescription: changeDescription,
-              language,
-              modelName
-          });
-          
-          setProjectFiles(prev => prev.map(f => f.name === changelogFile.name ? { ...f, content: updatedChangelogContent, changesCount: (f.changesCount || 0) + 1 } : f));
-        } catch (e) {
-          setNotification(`${t('changesAppliedNotification')} ${t('changelogUpdateFailed')}`);
-        }
-      }
-    }
-
-    if (autoReanalyze) {
-        handleAnalyze();
-    }
-  }, [libraryFiles, frontendFiles, analysisResult, refactoringRecommendation, autoReanalyze, currentInstruction, modelName, language, t, handleAnalyze]);
-  
-  const handleUndo = () => {
-    const lastState = undoStack[undoStack.length - 1];
-    if (lastState) {
-      setLibraryFiles(lastState.libraryFiles);
-      setFrontendFiles(lastState.frontendFiles);
-      setAnalysisResult(lastState.analysisResult);
-      setUndoStack(prev => prev.slice(0, -1));
-      setNotification(t('undoNotification'));
-    }
-  };
-
-  const handleUndoSpecificFix = useCallback(() => {
-    const lastState = undoStack[undoStack.length - 1];
-    if (!lastState) {
-      console.error("Undo stack is empty, cannot perform specific undo.");
-      setError(t('undoFailedError'));
-      return;
-    }
-    handleUndo();
+    setAnalysisResult(newAnalysisResult);
     setNotification(t('specificUndoSuccess'));
-  }, [undoStack, t, handleUndo]);
 
-  const handleToggleFixSelection = (key: string, fixDetails: {fileName: string, rec: Recommendation, recIndex: number, suggestionIndex: number}) => {
-    setSelectedFixes(prev => {
-      const newSelection = {...prev};
-      if (newSelection[key]) {
-        delete newSelection[key];
-      } else {
-        newSelection[key] = fixDetails;
-      }
-      return newSelection;
-    });
-  };
+  }, [analysisResult, libraryFiles, frontendFiles, t]);
 
-  const handleApplySelectedFixes = async () => {
-    const fixesToApply = Object.values(selectedFixes);
-    if (fixesToApply.length === 0) {
-        setError(t('noFixesSelectedError'));
-        return;
-    }
-    
-    setIsApplyingChanges(true);
-    setNotification(null);
-    setError(null);
-    
-    const instructions = fixesToApply.map(fix => {
-        const suggestion = fix.rec.suggestions[fix.suggestionIndex];
-        return {
-            fileName: fix.fileName,
-            code: fix.rec.originalCodeSnippet!,
-            instruction: `${fix.rec.description}\n\n${t('specificSuggestion')}: ${suggestion.title} - ${suggestion.description}`
-        };
-    });
-
-    try {
-        const result = await batchRefactorCode({
-            instructions,
-            libraryFiles,
-            frontendFiles,
-            modelName,
-            language
-        });
-
-        const { newLibraryFiles, newFrontendFiles, failedChanges } = applyChangesToFiles(result.changes, libraryFiles, frontendFiles);
-        
-        if (failedChanges.length === result.changes.length) { // all failed
-            const failedFiles = [...new Set(failedChanges.map(f => f.change.fileName))].join(', ');
-            throw new Error(t('batchApplyFailedError', { failedFiles }));
-        }
-        
-        pushToUndoStack({
-            libraryFiles: libraryFiles,
-            frontendFiles: frontendFiles,
-            analysisResult: analysisResult
-        });
-        
-        setLibraryFiles(newLibraryFiles);
-        setFrontendFiles(newFrontendFiles);
-
-        // Mark fixes as applied
-        const newAnalysisResult: Analysis = JSON.parse(JSON.stringify(analysisResult));
-        fixesToApply.forEach(fix => {
-            const fileAnalysis = 
-                newAnalysisResult.libraryProject.find(f => f.fileName === fix.fileName) ||
-                newAnalysisResult.frontendProject.find(f => f.fileName === fix.fileName);
-            if (fileAnalysis && fileAnalysis.recommendations[fix.recIndex]) {
-                fileAnalysis.recommendations[fix.recIndex].appliedSuggestionIndex = fix.suggestionIndex;
-            }
-        });
-        setAnalysisResult(newAnalysisResult);
-        
-        const appliedCount = result.changes.length - failedChanges.length;
-        setNotification(t('fixesAppliedNotification', { count: appliedCount }));
-        setSelectedFixes({});
-        
-        // Update changelogs for both projects if needed
-        const updateProjectChangelog = async (
-            fixes: typeof fixesToApply, 
-            projectFiles: UploadedFile[], 
-            setProjectFiles: React.Dispatch<React.SetStateAction<UploadedFile[]>>
-        ) => {
-            if (fixes.length === 0) return;
-
-            const changelogFile = projectFiles.find(f => f.name.toUpperCase() === 'CHANGELOG.MD');
-            if (!changelogFile) return;
-
-            const changeDescriptions = fixes.map(fix => {
-                const title = fix.rec.suggestions[fix.suggestionIndex].title;
-                return t('changelogEntry', { fileName: fix.fileName, title });
-            });
-
-            if (changeDescriptions.length > 0) {
-                const combinedDescription = changeDescriptions.join('\n- ');
-                try {
-                    const updatedChangelogContent = await updateChangelog({
-                        currentChangelog: changelogFile.content,
-                        changeDescription: combinedDescription,
-                        language,
-                        modelName
-                    });
-
-                    setProjectFiles(prev => prev.map(f => f.name === changelogFile.name ? { ...f, content: updatedChangelogContent, changesCount: (f.changesCount || 0) + changeDescriptions.length } : f));
-                } catch (e) {
-                    console.error(`Failed to update changelog for batch fixes`, e);
-                    setError(t('changelogUpdateFailed'));
-                }
-            }
-        };
-
-        const libraryFixes = fixesToApply.filter(fix => newLibraryFiles.some(f => f.name === fix.fileName));
-        const frontendFixes = fixesToApply.filter(fix => newFrontendFiles.some(f => f.name === fix.fileName));
-
-        await updateProjectChangelog(libraryFixes, newLibraryFiles, setLibraryFiles);
-        await updateProjectChangelog(frontendFixes, newFrontendFiles, setFrontendFiles);
-
-
-    } catch (e) {
-        console.error(e);
-        setError(e instanceof Error ? e.message : t('batchApplyUnknownError'));
-    } finally {
-        setIsApplyingChanges(false);
-    }
-  };
-
-  const downloadFile = (file: UploadedFile) => {
-    const blob = new Blob([file.content], { type: 'text/plain;charset=utf-8' });
+  const handleDownloadFile = (file: UploadedFile) => {
+    const blob = new Blob([file.content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -618,242 +633,208 @@ export default function App(): React.ReactNode {
     URL.revokeObjectURL(url);
   };
   
-  const getFileCountText = (count: number): string => {
-    if (count === 0) return '';
-    
-    if (language === 'ru') {
-        const n = Math.abs(count) % 100;
-        const n1 = n % 10;
-        if (n > 10 && n < 20) return t('fileCount_many', { count });
-        if (n1 > 1 && n1 < 5) return t('fileCount_few', { count });
-        if (n1 === 1) return t('fileCount_one', { count });
-        return t('fileCount_many', { count });
+  const handleChatKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleAskQuestion();
     }
-    
-    if (count === 1) {
-        return t('fileCount_one', { count });
-    }
-    return t('fileCount_many', { count });
   };
 
+  const handleClearChat = () => {
+    if (conversationHistory.length === 0) return;
+    if (window.confirm(t('clearChatWarning'))) {
+      setConversationHistory([]);
+      chatSessionRef.current = null;
+      setNotification(t('chatClearedNotification'));
+      setError(null);
+    }
+  };
+  
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white">
-      <header className="bg-gray-800/50 backdrop-blur-sm border-b border-gray-700 p-3 flex items-center justify-between sticky top-0 z-20">
-        <div className="flex items-center gap-3">
-            <WandIcon />
-            <h1 className="text-xl font-semibold text-white">{t('appTitle')}</h1>
+    <div className="bg-gray-900 text-white min-h-screen font-sans flex flex-col">
+      <header className="flex items-center justify-between p-4 border-b border-gray-700 bg-gray-800/50 backdrop-blur-sm sticky top-0 z-20">
+        <div className="flex items-center gap-4">
+          <WandIcon />
+          <h1 className="text-xl font-bold">{t('appTitle')}</h1>
         </div>
-        <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsHelpModalOpen(true)}
-              className="p-2 rounded-md hover:bg-gray-700 transition-colors"
-              title={t('help')}
-              aria-label={t('help')}
-            >
-              <HelpIcon />
-            </button>
-            <div className="h-6 w-px bg-gray-600 mx-1"></div>
-            <div className="flex items-center gap-1 bg-gray-900 p-1 rounded-md">
-                {(['en', 'ru'] as const).map(lang => (
-                    <button
-                        key={lang}
-                        onClick={() => setLanguage(lang)}
-                        className={`px-3 py-1 text-sm font-semibold rounded-md transition-colors ${language === lang ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:bg-gray-700/50'}`}
-                    >
-                        {lang.toUpperCase()}
-                    </button>
-                ))}
-            </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-sm">
+            <span className={language === 'en' ? 'font-bold text-white' : 'cursor-pointer text-gray-400 hover:text-white'} onClick={() => setLanguage('en')}>EN</span>
+            <span className="text-gray-500">|</span>
+            <span className={language === 'ru' ? 'font-bold text-white' : 'cursor-pointer text-gray-400 hover:text-white'} onClick={() => setLanguage('ru')}>RU</span>
+          </div>
+          <button onClick={() => setIsHelpModalOpen(true)} className="text-gray-400 hover:text-white" aria-label={t('help')}>
+            <HelpIcon />
+          </button>
+          <a href="https://github.com/google/generative-ai-docs/tree/main/apps/gas-code-analyzer" target="_blank" rel="noopener noreferrer" className="text-gray-400 hover:text-white">
+            <GithubIcon />
+          </a>
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0">
-        {/* Left Panel */}
-        <div className="w-1/3 max-w-sm flex flex-col border-r border-gray-700">
-          <div className="p-4 flex-grow overflow-y-auto">
-              <div className="mb-6">
-                  <h2 className="text-lg font-semibold mb-2 text-indigo-300 flex items-center justify-between">
-                    <span>{t('libraryProjectTitle')}</span>
-                    {libraryFiles.length > 0 && <span className="text-sm font-normal text-gray-400">{getFileCountText(libraryFiles.length)}</span>}
-                  </h2>
-                  <p className="text-sm text-gray-400 mb-3">{t('libraryProjectDescription')}</p>
-                  {libraryFiles.length === 0 ? (
-                    <FileUpload onFilesUploaded={handleLibraryFilesUploaded} setError={setError} />
-                  ) : (
-                      <div className="mt-4 space-y-2">
-                          {libraryFiles.map((file, index) => (
-                              <div key={index} className="bg-gray-800/50 p-2 rounded-md flex justify-between items-center text-sm">
-                                  <div className="flex items-center gap-2 truncate">
-                                      <FileCodeIcon />
-                                      <span className="truncate" title={file.name}>{file.name}</span>
-                                      {file.changesCount && file.changesCount > 0 && <span className="ml-2 text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full">{file.changesCount}</span>}
-                                  </div>
-                                  <div className="flex items-center flex-shrink-0">
-                                      <button onClick={() => handleViewFile(file)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('viewFile', {fileName: file.name})}><EyeIcon /></button>
-                                      <button onClick={() => downloadFile(file)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('download', {fileName: file.name})}><DownloadIcon /></button>
-                                      <button onClick={() => handleRemoveLibraryFile(index)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('remove', {fileName: file.name})}><XIcon className="w-4 h-4" /></button>
-                                  </div>
-                              </div>
-                          ))}
-                      </div>
-                  )}
+      <main className="flex-grow flex flex-col md:flex-row gap-6 p-6 overflow-hidden">
+        <div className="md:w-1/3 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar">
+          <section>
+            <h2 className="text-lg font-semibold mb-2">{t('libraryProjectTitle')}</h2>
+            <p className="text-sm text-gray-400 mb-3">{t('libraryProjectDescription')}</p>
+            <FileUpload onFilesUploaded={handleLibraryFilesUploaded} setError={setError} />
+            {libraryFiles.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {libraryFiles.map((file, index) => (
+                  <div key={`${file.name}-${index}`} className="flex items-center justify-between bg-gray-800/50 p-2 rounded-md text-sm">
+                    <span className="flex items-center gap-2 truncate" title={file.name}><FileCodeIcon /> <span className="truncate">{file.name}</span> {file.changesCount > 0 && <span className="text-yellow-400 text-xs font-bold">({file.changesCount})</span>}</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        <button onClick={() => handleViewFile(file)} className="text-gray-400 hover:text-white" title={t('viewFile', { fileName: file.name })}><EyeIcon /></button>
+                        <button onClick={() => handleDownloadFile(file)} className="text-gray-400 hover:text-white" title={t('download', { fileName: file.name })}><DownloadIcon /></button>
+                        <button onClick={() => handleRemoveLibraryFile(index)} className="text-gray-400 hover:text-white" title={t('remove', { fileName: file.name })}><XIcon className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div>
-                  <h2 className="text-lg font-semibold mb-2 text-indigo-300 flex items-center justify-between">
-                    <span>{t('frontendProjectTitle')}</span>
-                    {frontendFiles.length > 0 && <span className="text-sm font-normal text-gray-400">{getFileCountText(frontendFiles.length)}</span>}
-                  </h2>
-                  <p className="text-sm text-gray-400 mb-3">{t('frontendProjectDescription')}</p>
-                  {frontendFiles.length === 0 ? (
-                    <FileUpload onFilesUploaded={handleFrontendFilesUploaded} setError={setError} />
-                  ) : (
-                      <div className="mt-4 space-y-2">
-                          {frontendFiles.map((file, index) => (
-                             <div key={index} className="bg-gray-800/50 p-2 rounded-md flex justify-between items-center text-sm">
-                                  <div className="flex items-center gap-2 truncate">
-                                      <FileCodeIcon />
-                                      <span className="truncate" title={file.name}>{file.name}</span>
-                                       {file.changesCount && file.changesCount > 0 && <span className="ml-2 text-xs bg-green-500/20 text-green-300 px-2 py-0.5 rounded-full">{file.changesCount}</span>}
-                                  </div>
-                                  <div className="flex items-center flex-shrink-0">
-                                      <button onClick={() => handleViewFile(file)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('viewFile', {fileName: file.name})}><EyeIcon /></button>
-                                      <button onClick={() => downloadFile(file)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('download', {fileName: file.name})}><DownloadIcon /></button>
-                                      <button onClick={() => handleRemoveFrontendFile(index)} className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-700 rounded-md" title={t('remove', {fileName: file.name})}><XIcon className="w-4 h-4" /></button>
-                                  </div>
-                              </div>
-                          ))}
-                      </div>
-                  )}
+            )}
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold mb-2">{t('frontendProjectTitle')}</h2>
+            <p className="text-sm text-gray-400 mb-3">{t('frontendProjectDescription')}</p>
+            <FileUpload onFilesUploaded={handleFrontendFilesUploaded} setError={setError} />
+             {frontendFiles.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {frontendFiles.map((file, index) => (
+                  <div key={`${file.name}-${index}`} className="flex items-center justify-between bg-gray-800/50 p-2 rounded-md text-sm">
+                    <span className="flex items-center gap-2 truncate" title={file.name}><FileCodeIcon /> <span className="truncate">{file.name}</span> {file.changesCount > 0 && <span className="text-yellow-400 text-xs font-bold">({file.changesCount})</span>}</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        <button onClick={() => handleViewFile(file)} className="text-gray-400 hover:text-white" title={t('viewFile', { fileName: file.name })}><EyeIcon /></button>
+                        <button onClick={() => handleDownloadFile(file)} className="text-gray-400 hover:text-white" title={t('download', { fileName: file.name })}><DownloadIcon /></button>
+                        <button onClick={() => handleRemoveFrontendFile(index)} className="text-gray-400 hover:text-white" title={t('remove', { fileName: file.name })}><XIcon className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                ))}
               </div>
-          </div>
-          <div className="p-4 border-t border-gray-700 flex-shrink-0 bg-gray-900/50">
-              <h2 className="text-lg font-semibold mb-2 text-indigo-300">{t('analysisTitle')}</h2>
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-col sm:flex-row gap-2">
-                    <button
-                        onClick={handleAnalyze}
-                        disabled={isAnalyzing}
-                        className="w-full flex-grow bg-indigo-600 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                        {isAnalyzing && (
-                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                        )}
-                        {analysisResult && !isAnalyzing ? t('reanalyze') : t('analyze')}
-                    </button>
-                    <button
-                        onClick={handleTestProject}
-                        disabled={isAnalyzing}
-                        className="w-full sm:w-auto bg-gray-700 text-white font-semibold px-4 py-2 rounded-md transition-all hover:bg-gray-600 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                        title={t('testWithDemo')}
-                    >
-                      <BeakerIcon />
-                    </button>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                    <label htmlFor="model-select" className="text-gray-400">{t('geminiModel')}</label>
-                    <select
-                        id="model-select"
-                        value={modelName}
-                        onChange={(e) => setModelName(e.target.value as ModelName)}
-                        className="bg-gray-700 border-gray-600 rounded-md p-1.5 text-white text-xs focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                        <option value="gemini-2.5-flash">{t('flashModel')}</option>
-                    </select>
-                </div>
-              </div>
-          </div>
+            )}
+          </section>
+          
+          <div className="flex-grow"></div>
+
+          <button onClick={handleTestProject} className="w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-md transition-colors">
+            <BeakerIcon /> {t('testWithDemo')}
+          </button>
         </div>
-        
-        {/* Right Panel */}
-        <div className="flex-1 flex flex-col bg-gray-800/20 min-w-0">
-            <div className="border-b border-gray-700 flex-shrink-0">
-                <div className="flex p-1">
-                    <button 
-                        onClick={() => setActiveTab('analysis')}
-                        className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors w-1/2 ${activeTab === 'analysis' ? 'bg-gray-700/50 text-white' : 'text-gray-400 hover:bg-gray-800/50'}`}
-                    >
+
+        <div className="md:w-2/3 flex flex-col bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+          <div className="p-4 border-b border-gray-700 flex-shrink-0">
+            <h2 className="text-lg font-semibold mb-3">{t('analysisTitle')}</h2>
+            <div className="flex flex-wrap gap-4 items-center">
+              <button onClick={handleAnalyze} disabled={isAnalyzing || (libraryFiles.length === 0 && frontendFiles.length === 0)} className="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md transition-colors hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center min-w-[120px]">
+                {isAnalyzing ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    {t('analyzing')}
+                  </>
+                ) : (analysisResult ? t('reanalyze') : t('analyze'))}
+              </button>
+              
+               <div className="flex items-center gap-2">
+                    <input type="checkbox" id="autoReanalyze" checked={autoReanalyze} onChange={(e) => setAutoReanalyze(e.target.checked)} className="w-4 h-4 bg-gray-700 border-gray-500 rounded text-indigo-500 focus:ring-indigo-600 cursor-pointer" />
+                    <label htmlFor="autoReanalyze" className="text-sm text-gray-400 cursor-pointer">{t('autoReanalyze')}</label>
+                </div>
+                
+                <div className="flex items-center gap-2 text-sm text-gray-400 border-l border-gray-700 pl-4">
+                  <div className="relative flex h-3 w-3" title="Active Model">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                  </div>
+                  <span>{t('geminiModel')} <code className="font-mono bg-gray-700 text-indigo-300 px-1.5 py-1 rounded-md">{modelName}</code></span>
+                </div>
+            </div>
+            {error && (
+              <div className="mt-4 p-3 bg-red-900/30 border border-red-700/50 text-red-300 rounded-lg text-sm flex items-center justify-between">
+                <span><span className="font-bold">{t('errorTitle')}</span> {error}</span>
+                <button onClick={() => setError(null)} className="text-red-300 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors"><XIcon className="w-4 h-4" /></button>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex-grow flex flex-col overflow-hidden">
+            <div className="border-b border-gray-700 px-6 flex-shrink-0">
+                <nav className="-mb-px flex space-x-6" aria-label="Tabs">
+                    <button onClick={() => setActiveTab('analysis')} className={`${activeTab === 'analysis' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm`}>
                         {t('analysisTab')}
                     </button>
-                    <button 
-                        onClick={() => setActiveTab('chat')}
-                        className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors w-1/2 ${activeTab === 'chat' ? 'bg-gray-700/50 text-white' : 'text-gray-400 hover:bg-gray-800/50'}`}
-                    >
+                    <button onClick={() => setActiveTab('chat')} className={`${activeTab === 'chat' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'} whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm`}>
                         {t('chatTab')}
                     </button>
-                </div>
+                </nav>
             </div>
-            
-            <div className="flex-1 overflow-y-auto">
-                {activeTab === 'analysis' ? (
-                    <AnalysisResult 
-                        analysis={analysisResult} 
-                        isLoading={isAnalyzing}
-                        analysisProgress={analysisProgress}
-                        hasFiles={libraryFiles.length > 0 || frontendFiles.length > 0} 
-                        onApplyFix={handleApplyFix}
-                        notification={notification}
-                        onDismissNotification={() => setNotification(null)}
-                        analysisStats={analysisStats}
-                        onUndo={handleUndo}
-                        onUndoFix={handleUndoSpecificFix}
-                        canUndo={undoStack.length > 0}
-                        selectedFixes={selectedFixes}
-                        onToggleFixSelection={handleToggleFixSelection}
-                        onApplySelectedFixes={handleApplySelectedFixes}
-                        isApplyingChanges={isApplyingChanges}
-                    />
-                ) : (
-                    <ChatView 
-                        conversationHistory={conversationHistory}
-                        isAnswering={isAnswering}
-                    />
-                )}
+
+            <div className="flex-grow overflow-y-auto custom-scrollbar">
+              {activeTab === 'analysis' ? (
+                <AnalysisResult
+                  analysis={analysisResult}
+                  isLoading={isAnalyzing}
+                  analysisProgress={analysisProgress}
+                  hasFiles={libraryFiles.length > 0 || frontendFiles.length > 0}
+                  onApplyFix={handleApplyFix}
+                  notification={notification}
+                  onDismissNotification={() => setNotification(null)}
+                  analysisStats={analysisStats}
+                  onUndo={handleUndo}
+                  onUndoFix={handleUndoFix}
+                  canUndo={undoStack.length > 0}
+                  selectedFixes={selectedFixes}
+                  onToggleFixSelection={handleToggleFixSelection}
+                  onApplySelectedFixes={handleBatchApply}
+                  isApplyingChanges={isApplyingChanges}
+                />
+              ) : (
+                <ChatView conversationHistory={conversationHistory} isAnswering={isAnswering} />
+              )}
             </div>
-             {error && (
-                <div className="p-4 m-4 bg-red-900/30 border border-red-700/50 text-red-200 rounded-lg flex items-center justify-between gap-4">
-                  <span><strong>{t('errorTitle')}</strong> {error}</span>
-                  <button onClick={() => setError(null)} className="text-red-200 hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors" aria-label={t('closeNotificationAria')}>
-                    <XIcon className="w-5 h-5" />
+
+             <div className="p-4 border-t border-gray-700 flex-shrink-0">
+                <div className="flex gap-2 items-end">
+                  <textarea
+                    ref={textareaRef}
+                    rows={1}
+                    value={userQuestion}
+                    onChange={(e) => setUserQuestion(e.target.value)}
+                    onKeyDown={handleChatKeyDown}
+                    placeholder={t('questionPlaceholder')}
+                    className="flex-grow bg-gray-900 border border-gray-600 rounded-md py-2 px-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none overflow-y-hidden"
+                  />
+                  <button
+                    onClick={handleClearChat}
+                    disabled={isAnswering || conversationHistory.length === 0}
+                    className="p-2 rounded-md bg-gray-700 hover:bg-gray-600 transition-colors text-gray-300 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                    title={t('clearChatTitle')}
+                  >
+                     <XIcon className="w-5 h-5" />
+                  </button>
+                  <button onClick={handleAskQuestion} disabled={isAnswering || !userQuestion.trim()} className="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md transition-colors hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center min-w-[100px]">
+                     {isAnswering ? t('answering') : t('ask')}
                   </button>
                 </div>
-            )}
-            {activeTab === 'chat' && (
-                <div className="p-4 border-t border-gray-700">
-                    <div className="flex gap-2">
-                        <textarea
-                            value={userQuestion}
-                            onChange={(e) => setUserQuestion(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAskQuestion(); } }}
-                            placeholder={t('questionPlaceholder')}
-                            className="flex-grow bg-gray-700 border-gray-600 rounded-lg p-2 text-white placeholder-gray-400 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
-                            rows={2}
-                            disabled={isAnswering}
-                        />
-                        <button
-                            onClick={handleAskQuestion}
-                            disabled={isAnswering}
-                            className="bg-indigo-600 text-white font-semibold px-4 py-2 rounded-lg transition-colors hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed"
-                        >
-                            {isAnswering ? t('answering') : t('ask')}
-                        </button>
-                    </div>
-                </div>
-            )}
+            </div>
+          </div>
         </div>
-      </div>
+      </main>
+
       <RefactorResultModal 
-        isOpen={isRefactorModalOpen} 
-        onClose={() => setIsRefactorModalOpen(false)} 
-        result={currentRefactor} 
+        isOpen={isRefactorModalOpen}
+        onClose={() => setIsRefactorModalOpen(false)}
+        result={currentRefactor}
         isLoading={isRefactoring}
         isApplyingChanges={isApplyingChanges}
-        onConfirm={(result) => handleConfirmRefactor(result)}
+        onConfirm={handleConfirmRefactor}
       />
-      <HelpModal isOpen={isHelpModalOpen} onClose={() => setIsHelpModalOpen(false)} />
-      <FileViewerModal 
+      <HelpModal 
+        isOpen={isHelpModalOpen} 
+        onClose={() => setIsHelpModalOpen(false)} 
+      />
+      <FileViewerModal
         isOpen={isFileViewerOpen}
         onClose={() => setIsFileViewerOpen(false)}
         file={currentFileToView}

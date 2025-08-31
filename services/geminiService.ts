@@ -1,7 +1,3 @@
-
-
-
-
 import { GoogleGenAI, Type, Chat } from "@google/genai";
 import { UploadedFile, Analysis, RefactorResult, BatchInstruction, BatchRefactorResult, Recommendation, FailedChange, ModelName, FileAnalysis, ProgressUpdate, ConversationTurn } from '../types';
 import { Language } from "../I18nContext";
@@ -148,17 +144,28 @@ const getSchemas = (language: Language) => {
 }
 
 
-function buildSingleFileAnalysisPrompt(fileToAnalyze: UploadedFile, allFiles: UploadedFile[], language: Language): string {
+function buildSingleFileAnalysisPrompt(fileToAnalyze: UploadedFile, allFiles: UploadedFile[], language: Language, conversationHistory: ConversationTurn[]): string {
   const isRussian = language === 'ru';
   const fileNames = allFiles.map(f => f.name).join(', ');
   const langInstruction = isRussian 
     ? "You MUST respond exclusively in Russian. All text, including descriptions, titles, and suggestions, must be in Russian."
     : "You MUST respond exclusively in English. All text, including descriptions, titles, and suggestions, must be in English.";
+    
+  let conversationContext = '';
+  if (conversationHistory && conversationHistory.length > 0) {
+    const historyText = conversationHistory.map(turn => 
+        `User: ${turn.question}\nAssistant: ${turn.answer}`
+    ).join('\n\n');
+
+    conversationContext = isRussian 
+      ? `\n**Контекст из предыдущего чата:**\nВо время предыдущего анализа пользователь вел с вами диалог. Учтите эту переписку, чтобы улучшить текущий анализ. Возможно, пользователь указал на недостатки, которые вы пропустили.\n\n---\n${historyText}\n---\n`
+      : `\n**Context from Previous Chat:**\nA conversation occurred during the previous analysis. You MUST consider this chat history to improve the current analysis. The user may have pointed out flaws you missed.\n\n---\n${historyText}\n---\n`;
+  }
 
   return `
 You are an expert Google Apps Script (GAS) developer and code reviewer. Your task is to analyze a single provided GAS project file and return your analysis in a structured JSON format.
 ${langInstruction}
-
+${conversationContext}
 **Project Context:**
 You are analyzing the file \`${fileToAnalyze.name}\`.
 This file is part of a larger project that also contains the following files: ${fileNames}.
@@ -180,16 +187,27 @@ ${fileToAnalyze.content}
 `;
 }
 
-function buildSummaryPrompt(analysis: Analysis, language: Language): string {
+function buildSummaryPrompt(analysis: Analysis, language: Language, conversationHistory: ConversationTurn[]): string {
     const isRussian = language === 'ru';
     const langInstruction = isRussian 
         ? "You MUST respond exclusively in Russian. Your summary must be in Russian."
         : "You MUST respond exclusively in English. Your summary must be in English.";
+        
+    let conversationContext = '';
+    if (conversationHistory && conversationHistory.length > 0) {
+      const historyText = conversationHistory.map(turn => 
+          `User: ${turn.question}\nAssistant: ${turn.answer}`
+      ).join('\n\n');
+  
+      conversationContext = isRussian 
+        ? `\n**Контекст из предыдущего чата:**\nВо время предыдущего анализа пользователь вел с вами диалог. Учтите эту переписку, чтобы улучшить итоговый вывод. Возможно, пользователь указал на общие архитектурные проблемы, которые стоит подчеркнуть.\n\n---\n${historyText}\n---\n`
+        : `\n**Context from Previous Chat:**\nA conversation occurred during the previous analysis. You MUST consider this chat history to improve your overall summary. The user may have pointed out overarching architectural issues that you should emphasize.\n\n---\n${historyText}\n---\n`;
+    }
 
     return `
 You are an expert Google Apps Script (GAS) developer and code reviewer.
 Below is a series of file-by-file analyses for a GAS project. Your task is to synthesize this information into a high-level "Overall Summary".
-
+${conversationContext}
 **Instructions:**
 1. Review all the provided recommendations across all files.
 2. Identify any overarching themes, architectural problems, or critical issues that affect multiple parts of the project.
@@ -208,7 +226,7 @@ ${JSON.stringify(analysis, null, 2)}
 async function callGeminiWithFetch(prompt: string, schema: object | null, modelName: ModelName) {
     const API_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
   
-    const contents = [{ parts: [{ text: prompt }] }];
+    const contents = [{ role: 'user', parts: [{ text: prompt }] }];
     const generationConfig: any = {};
     if (schema) {
       generationConfig.responseMimeType = "application/json";
@@ -262,7 +280,7 @@ async function handleGeminiCallWithRetry(prompt: string, schema: object | null, 
 
       const response = await ai.models.generateContent({
         model: modelName,
-        contents: prompt,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: config,
       });
 
@@ -353,9 +371,10 @@ interface AnalyzeProjectParams {
     modelName: ModelName;
     language: Language;
     onProgress: (update: ProgressUpdate) => void;
+    conversationHistory: ConversationTurn[];
 }
 
-export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName, language, onProgress }: AnalyzeProjectParams): Promise<Analysis> {
+export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName, language, onProgress, conversationHistory }: AnalyzeProjectParams): Promise<Analysis> {
     const allFiles = [...libraryFiles, ...frontendFiles];
     const totalFiles = allFiles.length;
     const finalAnalysis: Analysis = {
@@ -375,7 +394,7 @@ export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName
             }
         });
 
-        const prompt = buildSingleFileAnalysisPrompt(file, allFiles, language);
+        const prompt = buildSingleFileAnalysisPrompt(file, allFiles, language, conversationHistory);
         const fileAnalysisResult = await handleGeminiCallWithRetry(prompt, fileAnalysisSchema, modelName, language) as FileAnalysis;
 
         const isLibraryFile = libraryFiles.some(f => f.name === file.name);
@@ -396,7 +415,7 @@ export async function analyzeGasProject({ libraryFiles, frontendFiles, modelName
 
     if (totalFiles > 0) {
         onProgress({ summary: 'Generating summary...' });
-        const summaryPrompt = buildSummaryPrompt(finalAnalysis, language);
+        const summaryPrompt = buildSummaryPrompt(finalAnalysis, language, conversationHistory);
         const summary = await handleGeminiCallWithRetry(summaryPrompt, null, modelName, language) as string;
         finalAnalysis.overallSummary = summary;
     }
@@ -678,7 +697,7 @@ export async function askQuestionAboutCode(params: AskQuestionParams): Promise<{
             });
         }
         
-        const response = await currentChat.sendMessage(prompt);
+        const response = await currentChat.sendMessage({ message: prompt });
         return { answer: response.text, chatSession: currentChat };
 
     } catch (e) {
