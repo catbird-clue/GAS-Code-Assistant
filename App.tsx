@@ -27,6 +27,19 @@ interface AnalysisProgress {
 }
 
 const MAX_UNDO_STACK_SIZE = 10;
+const CONTEXT_WINDOW_LIMIT = 128000; // Reference point for Gemini flash models context window size.
+
+const getIndicatorColor = (percentage: number) => {
+  if (percentage > 80) return 'text-red-400';
+  if (percentage >= 60) return 'text-yellow-400';
+  return 'text-green-400';
+};
+
+const getDotColor = (percentage: number) => {
+    if (percentage > 80) return 'bg-red-500';
+    if (percentage >= 60) return 'bg-yellow-500';
+    return 'bg-green-500';
+};
 
 export default function App(): React.ReactNode {
   const { language, setLanguage, t } = useTranslation();
@@ -63,6 +76,7 @@ export default function App(): React.ReactNode {
   
   const [isFileViewerOpen, setIsFileViewerOpen] = useState(false);
   const [currentFileToView, setCurrentFileToView] = useState<UploadedFile | null>(null);
+  const [contextFill, setContextFill] = useState(0);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -70,6 +84,19 @@ export default function App(): React.ReactNode {
         textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [userQuestion]);
+
+  useEffect(() => {
+    const allFiles = [...libraryFiles, ...frontendFiles];
+    if (allFiles.length === 0) {
+      setContextFill(0);
+      return;
+    }
+    const totalChars = allFiles.reduce((acc, file) => acc + file.content.length, 0);
+    // Rough estimation: 1 token ~ 4 characters for English.
+    const estimatedTokens = Math.round(totalChars / 4);
+    const percentage = Math.min(100, Math.round((estimatedTokens / CONTEXT_WINDOW_LIMIT) * 100));
+    setContextFill(percentage);
+  }, [libraryFiles, frontendFiles]);
 
   const pushToUndoStack = (state: UndoState) => {
     const newStack = [...undoStack, state];
@@ -748,6 +775,12 @@ export default function App(): React.ReactNode {
                     <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
                   </div>
                   <span>{t('geminiModel')} <code className="font-mono bg-gray-700 text-indigo-300 px-1.5 py-1 rounded-md">{modelName}</code></span>
+                </div>
+                <div title={t('contextWindowUsage')} className="flex items-center gap-2 text-sm text-gray-400 border-l border-gray-700 pl-4">
+                    <div className="relative flex h-3 w-3">
+                        <span className={`relative inline-flex rounded-full h-3 w-3 ${getDotColor(contextFill)}`}></span>
+                    </div>
+                    <span className={getIndicatorColor(contextFill)}>{contextFill}%</span>
                 </div>
             </div>
             {error && (

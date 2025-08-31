@@ -40,6 +40,7 @@ export const translations: Record<string, Record<string, string>> = {
     geminiModel: "Gemini Model:",
     flashModel: "Flash (fast)",
     proModel: "Pro (powerful)",
+    contextWindowUsage: "Context Window Usage",
     
     // Tabs
     analysisTab: "Analysis",
@@ -190,6 +191,7 @@ export const translations: Record<string, Record<string, string>> = {
     geminiModel: "Модель Gemini:",
     flashModel: "Flash (быстрая)",
     proModel: "Pro (мощная)",
+    contextWindowUsage: "Заполненность контекстного окна",
 
     // Tabs
     analysisTab: "Анализ",
