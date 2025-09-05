@@ -40,7 +40,8 @@ export const translations: Record<string, Record<string, string>> = {
     geminiModel: "Gemini Model:",
     flashModel: "Flash (fast)",
     proModel: "Pro (powerful)",
-    contextWindowUsage: "Context Window Usage",
+    projectSize: "Project Size",
+    projectSizeTooltip: "An estimate of your project's size relative to the model's context window. Large projects may take longer to analyze.",
     
     // Tabs
     analysisTab: "Analysis",
@@ -191,7 +192,8 @@ export const translations: Record<string, Record<string, string>> = {
     geminiModel: "Модель Gemini:",
     flashModel: "Flash (быстрая)",
     proModel: "Pro (мощная)",
-    contextWindowUsage: "Заполненность контекстного окна",
+    projectSize: "Размер проекта",
+    projectSizeTooltip: "Оценка размера вашего проекта относительно контекстного окна модели. Анализ больших проектов может занять больше времени.",
 
     // Tabs
     analysisTab: "Анализ",

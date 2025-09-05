@@ -776,7 +776,8 @@ export default function App(): React.ReactNode {
                   </div>
                   <span>{t('geminiModel')} <code className="font-mono bg-gray-700 text-indigo-300 px-1.5 py-1 rounded-md">{modelName}</code></span>
                 </div>
-                <div title={t('contextWindowUsage')} className="flex items-center gap-2 text-sm text-gray-400 border-l border-gray-700 pl-4">
+                <div title={t('projectSizeTooltip')} className="flex items-center gap-2 text-sm text-gray-400 border-l border-gray-700 pl-4">
+                    <span className="hidden sm:inline">{t('projectSize')}</span>
                     <div className="relative flex h-3 w-3">
                         <span className={`relative inline-flex rounded-full h-3 w-3 ${getDotColor(contextFill)}`}></span>
                     </div>
